@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>주식 자산 앱</title>
+    <link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4f46e5">
+  <link rel="stylesheet" href="style.css" />
+
+</head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<body>
+
+<h1>📊 내 주식 자산</h1>
+
+<!-- 🔘 하단 탭 -->
+<div id="tabbar">
+  <button id="asset-btn" onclick="showTab('asset')">📊 자산</button>
+  <button id="news-btn" onclick="showTab('news')">📰 뉴스</button>
+</div>
+
+
+<!-- =========================
+     📊 자산 탭
+========================= -->
+<div id="asset-tab">
+
+  <div class="input-area">
+    <input id="symbol" placeholder="종목" />
+    <input id="quantity" type="number" placeholder="수량" />
+    <input id="buyPrice" type="number" placeholder="매입가" />
+    <button onclick="addStock()">추가</button>
+  </div>
+
+  <h3>💰 현금</h3>
+  <input id="cashInput" type="number" />
+  <button onclick="setCash()">저장</button>
+
+  <h3 id="exchange-rate"></h3>
+
+  <h2 id="total">총 자산: 0원</h2>
+  <div id="profit"></div>
+
+  <ul id="stock-list"></ul>
+
+  <h2>📊 자산 그래프</h2>
+  <canvas id="barChart" width="400" height="200"></canvas>
+  <canvas id="pieChart" width="400" height="200"></canvas>
+
+  <canvas id="historyChart" width="800" height="400"></canvas>
+
+  <button onclick="saveSnapshot()">📅 저장</button>
+
+  <h3>📈 기록</h3>
+  <ul id="history"></ul>
+
+</div>
+
+<!-- =========================
+     📰 뉴스 탭
+========================= -->
+<div id="news-tab" style="display:none;">
+
+  <h3>🧾 내 보유 종목</h3>
+  <div id="news-stock-list"></div>
+
+  <h3>📰 뉴스</h3>
+  <div id="news"></div>
+
+</div>
+
+<button onclick="deleteSelected()">🗑 선택 삭제</button>
+<button onclick="resetAll()">🔥 초기화</button>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js')
+      .then((registration) => {
+        console.log('Service Worker 등록 성공:', registration);
+      })
+      .catch((error) => {
+        console.error('Service Worker 등록 실패:', error);
+      });
+  }
+</script>
+</body>
+</html>
