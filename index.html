@@ -2,12 +2,19 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>주식 자산 앱</title>
-    <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="주식자산">
+  <link rel="apple-touch-icon" href="icon.png">
+  
+  <meta name="theme-color" content="#4f46e5">
   <link rel="stylesheet" href="style.css" />
-
 </head>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <body>
@@ -84,5 +91,7 @@
       });
   }
 </script>
+
+<script src="app.js"></script>
 </body>
 </html>
