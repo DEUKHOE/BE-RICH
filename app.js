@@ -161,7 +161,7 @@ function updateTotalAndProfit(totalAssets) {
 }
 
 /* =========================
-   📈 차트 관리 (전역 변수 이름 변경으로 충돌 방지)
+   📈 차트 인스턴스 전역 관리
 ========================= */
 let myBarChart = null;
 let myPieChart = null;
@@ -170,100 +170,87 @@ let myHistoryChart = null;
 /* =========================
    📊 1. 종목 비중 차트 (Bar & Pie)
 ========================= */
-function renderCharts(totalAssets) {
-  const ctxBar = document.getElementById("barChart");
-  const ctxPie = document.getElementById("pieChart");
-  if (!ctxBar || !ctxPie) return;
+function renderCharts() {
+    const ctxBar = document.getElementById("barChart");
+    const ctxPie = document.getElementById("pieChart");
+    if (!ctxBar || !ctxPie) return;
 
-  const labels = ["현금", ...stocks.map(s => s.symbol)];
-  const values = [cash, ...stocks.map(s => {
-    let v = (prices[s.symbol] || 0) * s.quantity;
-    return s.currency === "USD" ? v * exchangeRate : v;
-  })];
-  const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
+    // 데이터 준비
+    const labels = ["현금", ...stocks.map(s => s.symbol)];
+    const values = [cash, ...stocks.map(s => {
+        let v = (prices[s.symbol] || 0) * s.quantity;
+        return s.currency === "USD" ? v * exchangeRate : v;
+    })];
+    const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
-  // [무한 루프 방지 핵심] 기존 차트가 있으면 완전히 삭제 후 재생성
-  if (myBarChart) {
-    myBarChart.destroy();
-  }
-  if (myPieChart) {
-    myPieChart.destroy();
-  }
+    // [핵심] 기존 차트 파괴 (메모리 및 캔버스 초기화)
+    if (myBarChart) myBarChart.destroy();
+    if (myPieChart) myPieChart.destroy();
 
-  myBarChart = new Chart(ctxBar, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: '자산 가치(원)',
-        data: values,
-        backgroundColor: backgroundColors
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false, // HTML/CSS에서 정의한 높이에 따름
-      plugins: { legend: { display: false } }
-    }
-  });
+    // 차트 생성 시 responsive 옵션 최적화
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false, // 컨테이너 높이에 맞춤
+        animation: false, // 무한 루프 시 시각적 떨림 방지
+        plugins: {
+            legend: { display: true, position: 'bottom' }
+        }
+    };
 
-  myPieChart = new Chart(ctxPie, {
-    type: 'pie',
-    data: {
-      labels: labels,
-      datasets: [{
-        data: values,
-        backgroundColor: backgroundColors
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false
-    }
-  });
+    myBarChart = new Chart(ctxBar, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{ label: '자산 가치(원)', data: values, backgroundColor: backgroundColors }]
+        },
+        options: { ...chartOptions, plugins: { legend: { display: false } } }
+    });
+
+    myPieChart = new Chart(ctxPie, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{ data: values, backgroundColor: backgroundColors }]
+        },
+        options: chartOptions
+    });
 }
 
 /* =========================
    📈 2. 자산 추이 그래프 (Line)
 ========================= */
 function renderHistoryChart() {
-  const ctx = document.getElementById("historyChart");
-  if (!ctx) return;
+    const ctx = document.getElementById("historyChart");
+    if (!ctx) return;
 
-  const history = JSON.parse(localStorage.getItem("history") || "[]");
-  if (history.length === 0) return;
+    const history = JSON.parse(localStorage.getItem("history") || "[]");
+    if (history.length === 0) return;
 
-  const labels = history.map(h => h.date);
-  const data = history.map(h => h.total);
+    const labels = history.map(h => h.date);
+    const data = history.map(h => h.total);
 
-  // [무한 루프 방지 핵심]
-  if (myHistoryChart) {
-    myHistoryChart.destroy();
-  }
+    if (myHistoryChart) myHistoryChart.destroy();
 
-  myHistoryChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: '총 자산 추이',
-        data: data,
-        borderColor: '#4f46e5',
-        backgroundColor: 'rgba(79, 70, 229, 0.1)',
-        fill: true,
-        tension: 0.4
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          beginAtZero: false // 변동성을 직관적으로 보여주기 위해 false 설정
+    myHistoryChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '총 자산 추이',
+                data: data,
+                borderColor: '#4f46e5',
+                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false, // 깜빡임 방지
+            scales: { y: { beginAtZero: false } }
         }
-      }
-    }
-  });
+    });
 }
 
 /* =========================
