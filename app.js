@@ -162,9 +162,8 @@ function updateTotalAndProfit(totalAssets) {
   pEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
   pEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent.toFixed(2)}%)`;
 }
-
 /* =========================
-   📊 차트 (색상 통일 및 현금 포함)
+   📊 차트 (색상 개별 적용 수정본)
 ========================= */
 function renderCharts(totalAssets) {
   const ctxBar = document.getElementById("barChart");
@@ -177,32 +176,62 @@ function renderCharts(totalAssets) {
     return s.currency === "USD" ? v * exchangeRate : v;
   })];
   
-  // 색상을 레이블 수만큼 반복해서 할당 (통일성)
+  // 색상 배열 생성
   const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
+  // 1. 막대 차트 수정
   if (barChart) barChart.destroy();
   barChart = new Chart(ctxBar, {
     type: 'bar',
     data: { 
       labels, 
-      datasets: [{ data: values, backgroundColor: backgroundColors }] 
+      datasets: [{ 
+        label: '자산 가치(원)',
+        data: values, 
+        backgroundColor: backgroundColors, // 이 부분이 배열로 들어가야 각 막대 색이 달라집니다.
+        borderColor: backgroundColors,
+        borderWidth: 1
+      }] 
     },
     options: {
       responsive: true,
-      plugins: { legend: { display: false } }
+      maintainAspectRatio: false,
+      plugins: { 
+        legend: { display: false }, // 막대 차트는 범례 숨김
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.label}: ${Math.floor(item.raw).toLocaleString()}원`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: (value) => value.toLocaleString() + '원'
+          }
+        }
+      }
     }
   });
 
+  // 2. 원형 차트 수정
   if (pieChart) pieChart.destroy();
   pieChart = new Chart(ctxPie, {
     type: 'pie',
     data: { 
       labels, 
-      datasets: [{ data: values, backgroundColor: backgroundColors }] 
+      datasets: [{ 
+        data: values, 
+        backgroundColor: backgroundColors,
+        hoverOffset: 4
+      }] 
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
+        legend: { position: 'bottom' },
         tooltip: {
           callbacks: {
             label: (item) => {
@@ -215,7 +244,6 @@ function renderCharts(totalAssets) {
     }
   });
 }
-
 /* =========================
    📅 일일 자산 추이 기록
 ========================= */
