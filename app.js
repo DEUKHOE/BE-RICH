@@ -204,45 +204,60 @@ function renderCharts(totalAssets) {
 }
 
 /* =========================
-   📈 자산 변동 추이 (Line Chart)
+   📈 자산 변동 그래프 (직관성 강화)
 ========================= */
 function renderHistoryChart() {
-  const ctxHistory = document.getElementById("historyChart");
-  if (!ctxHistory) return;
+  const ctx = document.getElementById("historyChart");
+  if (!ctx) return;
 
   const history = JSON.parse(localStorage.getItem("history") || "[]");
+  if (history.length === 0) return;
+
   const labels = history.map(h => h.date);
   const data = history.map(h => h.total);
 
   if (historyChart) historyChart.destroy();
-  historyChart = new Chart(ctxHistory, {
+
+  historyChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: labels,
       datasets: [{
-        label: '일별 총 자산',
+        label: '총 자산 추이',
         data: data,
         borderColor: '#4f46e5',
         backgroundColor: 'rgba(79, 70, 229, 0.1)',
+        borderWidth: 3,
         fill: true,
-        tension: 0.3
+        tension: 0.4, // 곡선 적용으로 더 직관적으로 변경
+        pointRadius: 4,
+        pointBackgroundColor: '#4f46e5'
       }]
     },
-    options: { 
-      responsive: true, 
+    options: {
+      responsive: true,
       maintainAspectRatio: false,
-      scales: { y: { beginAtZero: false, ticks: { callback: v => v.toLocaleString() + '원' } } }
+      scales: {
+        y: {
+          beginAtZero: false, // 하락/상승폭을 더 크게 보여주기 위해 false
+          ticks: { callback: v => v.toLocaleString() + '원' }
+        }
+      },
+      plugins: {
+        legend: { display: false }
+      }
     }
   });
 }
 
+
 /* =========================
-   📅 히스토리 저장 및 렌더링
+   📅 스냅샷 저장 (그래프 자동 갱신)
 ========================= */
 function saveSnapshot() {
   const history = JSON.parse(localStorage.getItem("history") || "[]");
   const now = new Date();
-  const today = `${now.getMonth() + 1}-${now.getDate()}`;
+  const today = `${now.getMonth() + 1}/${now.getDate()}`;
 
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
@@ -260,8 +275,8 @@ function saveSnapshot() {
 
   localStorage.setItem("history", JSON.stringify(history));
   renderHistory();
-  renderHistoryChart();
-  alert(`기록 완료: ${totalAssets.toLocaleString()}원`);
+  renderHistoryChart(); // 그래프 즉시 반영
+  alert(`오늘의 자산(${totalAssets.toLocaleString()}원)이 기록되었습니다.`);
 }
 
 function renderHistory() {
@@ -288,10 +303,31 @@ function loadCash() {
   cash = Number(localStorage.getItem("cash") || 0); 
   if(document.getElementById("cashInput")) document.getElementById("cashInput").value = cash;
 }
+
+/* =========================
+   🔄 탭 전환 함수 (뉴스 리스트 포함)
+========================= */
 function showTab(tab) {
-  document.getElementById("asset-tab").style.display = tab === "asset" ? "block" : "none";
-  document.getElementById("news-tab").style.display = tab === "news" ? "block" : "none";
+  const assetTab = document.getElementById("asset-tab");
+  const newsTab = document.getElementById("news-tab");
+  const assetBtn = document.getElementById("asset-btn");
+  const newsBtn = document.getElementById("news-btn");
+
+  if (tab === "asset") {
+    assetTab.style.display = "block";
+    newsTab.style.display = "none";
+    assetBtn.classList.add("active");
+    newsBtn.classList.remove("active");
+  } else {
+    assetTab.style.display = "none";
+    newsTab.style.display = "block";
+    assetBtn.classList.remove("active");
+    newsBtn.classList.add("active");
+    renderNewsStockList(); // 뉴스 탭 진입 시 종목 리스트 갱신
+  }
 }
+
+
 function deleteSelected() {
   const checks = document.querySelectorAll(".select-stock");
   stocks = stocks.filter((_, i) => !checks[i].checked);
