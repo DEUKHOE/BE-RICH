@@ -7,6 +7,12 @@ let cash = Number(localStorage.getItem("cash") || 0);
 let exchangeRate = 1350;
 let barChart, pieChart;
 
+// 차트 색상 팔레트 (통일감 유지용)
+const colorPalette = [
+  '#10b981', '#4f46e5', '#f59e0b', '#ef4444', '#8b5cf6', 
+  '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'
+];
+
 async function init() {
   loadCash();
   await getExchangeRate();
@@ -19,7 +25,7 @@ async function init() {
 }
 
 /* =========================
-   🌍 환율 및 시세 데이터
+   🌍 데이터 통신 및 저장
 ========================= */
 async function getExchangeRate() {
   try {
@@ -38,9 +44,7 @@ async function getPrice(symbol) {
     const res = await fetch(url);
     const data = await res.json();
     if (data.status === "error" || !data.price) return null;
-    const upperSymbol = symbol.toUpperCase();
-    const isKRW = upperSymbol.includes("KRW") || upperSymbol.includes(".KS") || upperSymbol.includes(".KQ");
-    return { price: parseFloat(data.price), currency: isKRW ? "KRW" : "USD" };
+    return { price: parseFloat(data.price), currency: (symbol.includes(".KS") || symbol.includes(".KQ")) ? "KRW" : "USD" };
   } catch (err) { return null; }
 }
 
@@ -53,14 +57,13 @@ async function refreshPrices() {
 }
 
 /* =========================
-   ➕ 종목 및 현금 관리
+   ➕ 자산 관리 로직
 ========================= */
 function setCash() {
   const cashInput = document.getElementById("cashInput");
   cash = Number(cashInput.value) || 0;
   saveCash();
   render();
-  alert("현금이 반영되었습니다!");
 }
 
 async function addStock() {
@@ -83,14 +86,13 @@ async function addStock() {
 }
 
 /* =========================
-   🎨 UI 렌더링 및 비중 계산
+   🎨 UI 및 비중 렌더링
 ========================= */
 function render() {
   const list = document.getElementById("stock-list");
   if (!list) return;
   list.innerHTML = "";
 
-  // 1. 총 자산 먼저 계산 (비중 계산용)
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
     let v = (prices[s.symbol] || 0) * s.quantity;
@@ -99,7 +101,7 @@ function render() {
   });
   const totalAssets = cash + currentStockValueTotal;
 
-  // 2. 현금 카드 상단에 추가
+  // 현금 비중 표시
   const cashDiv = document.createElement("div");
   const cashWeight = totalAssets > 0 ? ((cash / totalAssets) * 100).toFixed(1) : 0;
   cashDiv.className = "stock-card";
@@ -113,17 +115,14 @@ function render() {
   `;
   list.appendChild(cashDiv);
 
-  // 3. 종목 리스트 렌더링
+  // 종목 카드 리스트
   stocks.forEach((stock) => {
     const currentPrice = prices[stock.symbol] || 0;
     const isUSD = stock.currency === "USD";
-    const buyTotal = stock.buyPrice * stock.quantity;
     const currentTotal = (currentPrice * stock.quantity) * (isUSD ? exchangeRate : 1);
     const weight = totalAssets > 0 ? ((currentTotal / totalAssets) * 100).toFixed(1) : 0;
-    
-    const profit = currentTotal - (buyTotal * (isUSD ? exchangeRate : 1));
-    const percent = buyTotal > 0 ? (profit / (buyTotal * (isUSD ? exchangeRate : 1))) * 100 : 0;
-    const color = profit >= 0 ? "#ef4444" : "#3b82f6";
+    const profit = currentTotal - (stock.buyPrice * stock.quantity * (isUSD ? exchangeRate : 1));
+    const percent = (stock.buyPrice > 0) ? (profit / (stock.buyPrice * stock.quantity * (isUSD ? exchangeRate : 1))) * 100 : 0;
 
     const div = document.createElement("div");
     div.className = "stock-card";
@@ -133,8 +132,7 @@ function render() {
         <strong>${stock.symbol}</strong>
         <span style="font-size:0.8rem; color:#666;">비중 ${weight}%</span>
       </div>
-      <div style="font-size:0.85rem; color:#888; margin-top:4px;">수량: ${stock.quantity} / 매입가: ${stock.buyPrice.toLocaleString()}${stock.currency}</div>
-      <div style="margin-top:8px; font-weight:bold; color:${color}">
+      <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}">
         수익: ${Math.floor(profit).toLocaleString()}원 (${percent.toFixed(2)}%)
       </div>
       <input type="checkbox" class="select-stock" style="margin-top:10px;" onclick="event.stopPropagation()">
@@ -149,14 +147,13 @@ function render() {
 
 function updateTotalAndProfit(totalAssets) {
   let totalInvested = 0;
-  let currentStockValue = 0;
   stocks.forEach(s => {
     let bV = s.buyPrice * s.quantity;
-    let nV = (prices[s.symbol] || 0) * s.quantity;
-    if (s.currency === "USD") { bV *= exchangeRate; nV *= exchangeRate; }
-    totalInvested += bV; currentStockValue += nV;
+    if (s.currency === "USD") bV *= exchangeRate;
+    totalInvested += bV;
   });
 
+  const currentStockValue = totalAssets - cash;
   const totalProfit = currentStockValue - totalInvested;
   const totalPercent = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
 
@@ -167,99 +164,104 @@ function updateTotalAndProfit(totalAssets) {
 }
 
 /* =========================
-   📊 차트 (현금 포함 및 비중 표시)
+   📊 차트 (색상 통일 및 현금 포함)
 ========================= */
 function renderCharts(totalAssets) {
   const ctxBar = document.getElementById("barChart");
   const ctxPie = document.getElementById("pieChart");
-  if (!ctxBar) return;
+  if (!ctxBar || !ctxPie) return;
 
   const labels = ["현금", ...stocks.map(s => s.symbol)];
   const values = [cash, ...stocks.map(s => {
     let v = (prices[s.symbol] || 0) * s.quantity;
     return s.currency === "USD" ? v * exchangeRate : v;
   })];
+  
+  // 색상을 레이블 수만큼 반복해서 할당 (통일성)
+  const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
   if (barChart) barChart.destroy();
   barChart = new Chart(ctxBar, {
     type: 'bar',
-    data: { labels, datasets: [{ label: '가치(원)', data: values, backgroundColor: '#4f46e5' }] },
-    options: { responsive: true, plugins: { legend: { display: false } } }
+    data: { 
+      labels, 
+      datasets: [{ data: values, backgroundColor: backgroundColors }] 
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } }
+    }
   });
 
-  if (ctxPie) {
-    if (pieChart) pieChart.destroy();
-    pieChart = new Chart(ctxPie, {
-      type: 'pie',
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          backgroundColor: ['#10b981', '#4f46e5', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
-        }]
-      },
-      options: {
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: (item) => {
-                const val = item.raw;
-                const pct = totalAssets > 0 ? ((val / totalAssets) * 100).toFixed(1) : 0;
-                return ` ${item.label}: ${Math.floor(val).toLocaleString()}원 (${pct}%)`;
-              }
+  if (pieChart) pieChart.destroy();
+  pieChart = new Chart(ctxPie, {
+    type: 'pie',
+    data: { 
+      labels, 
+      datasets: [{ data: values, backgroundColor: backgroundColors }] 
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (item) => {
+              const pct = totalAssets > 0 ? ((item.raw / totalAssets) * 100).toFixed(1) : 0;
+              return ` ${item.label}: ${Math.floor(item.raw).toLocaleString()}원 (${pct}%)`;
             }
           }
         }
       }
-    });
-  }
+    }
+  });
 }
 
 /* =========================
-   📰 뉴스 기능 (네이버/구글 뉴스 백업 추가)
+   📅 일일 자산 추이 기록
 ========================= */
-function showTab(tab) {
-  document.getElementById("asset-tab").style.display = tab === "asset" ? "block" : "none";
-  document.getElementById("news-tab").style.display = tab === "news" ? "block" : "none";
-  if(tab === 'news') renderNewsStockList();
-}
+function saveSnapshot() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const today = new Date().toLocaleDateString(); // "2026. 5. 4." 형식
 
-function renderNewsStockList() {
-  const container = document.getElementById("news-stock-list");
-  if (!container) return;
-  container.innerHTML = stocks.map(s => `
-    <button onclick="renderNews('${s.symbol}')" style="margin:5px; padding:8px 15px; border-radius:20px; border:1px solid #4f46e5; background:#fff;">${s.symbol}</button>
-  `).join("");
-}
+  let currentStockValueTotal = 0;
+  stocks.forEach(s => {
+    let v = (prices[s.symbol] || 0) * s.quantity;
+    if (s.currency === "USD") v *= exchangeRate;
+    currentStockValueTotal += v;
+  });
+  const totalAssets = Math.round(cash + currentStockValueTotal);
 
-async function renderNews(symbol) {
-  const newsEl = document.getElementById("news");
-  newsEl.innerHTML = `🔍 ${symbol} 뉴스 검색 중...`;
-  
-  const API_KEY = "9a5356806279fa3e87a387d4c1fe6a14";
-  const url = `https://gnews.io/api/v4/search?q=${symbol}&lang=ko&max=5&apikey=${API_KEY}`;
-
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.articles || data.articles.length === 0) throw new Error();
-
-    newsEl.innerHTML = `<h3>📰 ${symbol} 뉴스</h3>` + data.articles.map(a => `
-      <div style="margin-bottom:12px; border-bottom:1px solid #eee; padding-bottom:8px;">
-        <a href="${a.url}" target="_blank" style="text-decoration:none; color:#333; font-weight:bold;">${a.title}</a>
-      </div>
-    `).join("");
-  } catch (err) {
-    newsEl.innerHTML = `
-      <div style="padding:20px; text-align:center; background:#f9fafb; border-radius:10px;">
-        <p style="color:#666;">실시간 뉴스 API 한도가 초과되었습니다.</p>
-        <p style="font-weight:bold; margin:10px 0;">아래 버튼을 눌러 소식을 확인하세요!</p>
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <a href="https://search.naver.com/search.naver?where=news&query=${symbol}" target="_blank" style="padding:10px 15px; background:#03c75a; color:#fff; text-decoration:none; border-radius:5px;">네이버 뉴스</a>
-          <a href="https://www.google.com/search?q=${symbol}&tbm=nws" target="_blank" style="padding:10px 15px; background:#4285f4; color:#fff; text-decoration:none; border-radius:5px;">구글 뉴스</a>
-        </div>
-      </div>`;
+  const existingIdx = history.findIndex(h => h.date === today);
+  if (existingIdx > -1) {
+    history[existingIdx].total = totalAssets;
+  } else {
+    history.push({ date: today, total: totalAssets });
   }
+
+  // 최근 7일 데이터만 유지
+  if (history.length > 7) history.shift();
+
+  localStorage.setItem("history", JSON.stringify(history));
+  renderHistory();
+  alert("오늘의 자산 현황이 기록되었습니다!");
+}
+
+function renderHistory() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const el = document.getElementById("history");
+  if (!el) return;
+  
+  if (history.length === 0) {
+    el.innerHTML = "<p style='color:#999; font-size:0.9rem;'>기록된 데이터가 없습니다.</p>";
+    return;
+  }
+
+  el.innerHTML = history.slice().reverse().map(h => `
+    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #eee;">
+      <span style="color:#666;">${h.date}</span>
+      <span style="font-weight:bold;">${h.total.toLocaleString()}원</span>
+    </div>
+  `).join("");
 }
 
 /* =========================
@@ -272,16 +274,15 @@ function loadCash() {
   cash = Number(localStorage.getItem("cash") || 0); 
   if(document.getElementById("cashInput")) document.getElementById("cashInput").value = cash;
 }
-function renderHistory() {
-  const history = JSON.parse(localStorage.getItem("history") || "[]");
-  const el = document.getElementById("history");
-  if (el) el.innerHTML = history.slice().reverse().slice(0, 5).map(h => `<li>${h.date}: ${h.total.toLocaleString()}원</li>`).join("");
+function showTab(tab) {
+  document.getElementById("asset-tab").style.display = tab === "asset" ? "block" : "none";
+  document.getElementById("news-tab").style.display = tab === "news" ? "block" : "none";
+  if(tab === 'news') renderNewsStockList();
 }
 function deleteSelected() {
   const checks = document.querySelectorAll(".select-stock");
   stocks = stocks.filter((_, i) => !checks[i].checked);
   saveStocks(); render();
 }
-function resetAll() { if(confirm("초기화할까요?")) { localStorage.clear(); location.reload(); } }
 
 init();
