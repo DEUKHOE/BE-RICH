@@ -1,33 +1,31 @@
-// 캐시할 자원들
-const CACHE_NAME = "stock-app-cache-v1";
+const CACHE_NAME = "stock-app-cache-v2";
 const urlsToCache = [
-  "/",
-  "/index.html",
-  "/style.css",
-  "/app.js",
-  "/icons/icon-192x192.png",
+  "./",
+  "./index.html",
+  "./app.js",
+  // style.css 파일이 실제로 폴더에 있는지 꼭 확인하세요!
 ];
 
-// 서비스 워커 설치 시 캐시하기
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(urlsToCache).catch((error) => {
-        console.error("캐시 저장 실패:", error);
-      });
+      // addAll 대신 하나씩 추가하여 에러가 나도 나머지는 캐시되게 함
+      return Promise.allSettled(
+        urlsToCache.map(url => 
+          cache.add(url).catch(err => console.log(`${url} 캐시 실패 (파일 확인 필요)`))
+        )
+      );
     })
   );
+  self.skipWaiting();
 });
 
-// 서비스 워커 활성화
 self.addEventListener("activate", (event) => {
-  // 이전 버전의 캐시 삭제 (필요시)
-  const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (!cacheWhitelist.includes(cacheName)) {
+          if (cacheName !== CACHE_NAME) {
             return caches.delete(cacheName);
           }
         })
@@ -36,24 +34,20 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// 네트워크 요청을 처리하는 fetch 이벤트 리스너
 self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // 캐시가 있으면 캐시 응답 반환
-      if (cachedResponse) {
-        return cachedResponse;
-      }
+  // 1. 외부 API 호출은 서비스 워커가 간섭하지 않고 바로 네트워크로 통과시킵니다.
+  if (
+    event.request.url.includes('query1.finance.yahoo.com') || 
+    event.request.url.includes('api.allorigins.win') ||
+    event.request.url.includes('api.twelvedata.com') // Twelve Data 추가
+  ) {
+    return; 
+  }
 
-      // 캐시가 없으면 네트워크 요청 후 캐시에 저장
-      return fetch(event.request).then((networkResponse) => {
-        return caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, networkResponse.clone());
-          return networkResponse;
-        });
-      });
-    }).catch((error) => {
-      console.error("fetch 처리 실패:", error);
+  // 2. 나머지는 기존 캐시 로직 처리
+  event.respondWith(
+    caches.match(event.request).then((response) => {
+      return response || fetch(event.request);
     })
   );
 });
