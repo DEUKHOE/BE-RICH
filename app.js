@@ -161,14 +161,11 @@ function updateTotalAndProfit(totalAssets) {
 }
 
 /* =========================
-   📈 차트 관리 (전역 변수)
+   📈 차트 관리 (전역 변수 이름 변경으로 충돌 방지)
 ========================= */
-// 차트 인스턴스를 저장할 변수들
-let barChartInstance = null;
-let pieChartInstance = null;
-let historyChartInstance = null;
-
-
+let myBarChart = null;
+let myPieChart = null;
+let myHistoryChart = null;
 
 /* =========================
    📊 1. 종목 비중 차트 (Bar & Pie)
@@ -185,33 +182,45 @@ function renderCharts(totalAssets) {
   })];
   const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
-  // [버그 수정] 막대 차트 업데이트
-  if (barChartInstance) {
-    barChartInstance.data.labels = labels;
-    barChartInstance.data.datasets[0].data = values;
-    barChartInstance.data.datasets[0].backgroundColor = backgroundColors;
-    barChartInstance.update('none'); // 애니메이션 없이 업데이트하여 깜빡임 방지
-  } else {
-    barChartInstance = new Chart(ctxBar, {
-      type: 'bar',
-      data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
+  // [무한 루프 방지 핵심] 기존 차트가 있으면 완전히 삭제 후 재생성
+  if (myBarChart) {
+    myBarChart.destroy();
+  }
+  if (myPieChart) {
+    myPieChart.destroy();
   }
 
-  // [버그 수정] 원형 차트 업데이트
-  if (pieChartInstance) {
-    pieChartInstance.data.labels = labels;
-    pieChartInstance.data.datasets[0].data = values;
-    pieChartInstance.data.datasets[0].backgroundColor = backgroundColors;
-    pieChartInstance.update('none');
-  } else {
-    pieChartInstance = new Chart(ctxPie, {
-      type: 'pie',
-      data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
-  }
+  myBarChart = new Chart(ctxBar, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '자산 가치(원)',
+        data: values,
+        backgroundColor: backgroundColors
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false, // HTML/CSS에서 정의한 높이에 따름
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  myPieChart = new Chart(ctxPie, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: backgroundColors
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false
+    }
+  });
 }
 
 /* =========================
@@ -227,34 +236,35 @@ function renderHistoryChart() {
   const labels = history.map(h => h.date);
   const data = history.map(h => h.total);
 
-  // [버그 수정] 기존 차트가 있으면 데이터만 교체
-  if (historyChartInstance) {
-    historyChartInstance.data.labels = labels;
-    historyChartInstance.data.datasets[0].data = data;
-    historyChartInstance.update();
-  } else {
-    historyChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: '총 자산 추이',
-          data: data,
-          borderColor: '#4f46e5',
-          tension: 0.4,
-          fill: true,
-          backgroundColor: 'rgba(79, 70, 229, 0.1)'
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: false } }
-      }
-    });
+  // [무한 루프 방지 핵심]
+  if (myHistoryChart) {
+    myHistoryChart.destroy();
   }
-}
 
+  myHistoryChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '총 자산 추이',
+        data: data,
+        borderColor: '#4f46e5',
+        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: false // 변동성을 직관적으로 보여주기 위해 false 설정
+        }
+      }
+    }
+  });
+}
 
 /* =========================
    📅 스냅샷 저장 (그래프 자동 갱신)
@@ -330,6 +340,34 @@ function showTab(tab) {
     newsBtn.classList.add("active");
     renderNewsStockList(); // 뉴스 탭 진입 시 종목 리스트 갱신
   }
+}
+
+function renderNewsStockList() {
+  const container = document.getElementById("news-stock-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  stocks.forEach(stock => {
+    const btn = document.createElement("button");
+    btn.innerText = stock.symbol;
+    btn.style = "margin:5px; padding:10px; border-radius:8px; border:1px solid #4f46e5; background:white; cursor:pointer;";
+    btn.onclick = () => renderNews(stock.symbol);
+    container.appendChild(btn);
+  });
+}
+
+function renderNews(symbol) {
+  const newsDiv = document.getElementById("news");
+  if (!newsDiv) return;
+  
+  const query = encodeURIComponent(symbol);
+  newsDiv.innerHTML = `
+    <div style="margin-top:20px; padding:15px; background:#f8fafc; border-radius:10px;">
+      <h4>${symbol} 관련 소식</h4>
+      <p>최신 뉴스를 보려면 아래 링크를 확인하세요.</p>
+      <a href="https://www.google.com/search?q=${query}+주가+뉴스" target="_blank" style="color:#4f46e5; font-weight:bold;">🔗 Google 뉴스 바로가기</a>
+    </div>
+  `;
 }
 
 
