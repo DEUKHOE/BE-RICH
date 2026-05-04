@@ -44,13 +44,6 @@ function showTab(tab) {
   }
 }
 
-function setCash() {
-  const cashInput = document.getElementById("cashInput");
-  cash = Number(cashInput.value);
-  saveCash();
-  render();
-  alert("현금이 저장되었습니다!");
-}
 
 
 /* =========================
