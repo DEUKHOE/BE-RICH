@@ -219,48 +219,69 @@ function renderCharts() {
 /* =========================
    📈 2. 자산 추이 그래프 (Line)
 ========================= */
+// 차트 인스턴스 전역 변수 (중복 생성 방지)
+let myHistoryChart = null;
+
 function renderHistoryChart() {
-    const ctx = document.getElementById("historyChart");
-    if (!ctx) return;
+  const ctx = document.getElementById("historyChart");
+  if (!ctx) return;
 
-    const history = JSON.parse(localStorage.getItem("history") || "[]");
-    if (history.length === 0) return;
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  if (history.length === 0) return;
 
-    const labels = history.map(h => h.date);
-    const data = history.map(h => h.total);
+  // X축: 날짜, Y축: 자산 총액
+  const labels = history.map(h => h.date);
+  const data = history.map(h => h.total);
 
-    if (myHistoryChart) myHistoryChart.destroy();
+  // 기존 차트 파괴 (이게 없으면 버그가 생김)
+  if (myHistoryChart) {
+    myHistoryChart.destroy();
+  }
 
-    myHistoryChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: '총 자산 추이',
-                data: data,
-                borderColor: '#4f46e5',
-                backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false, // 깜빡임 방지
-            scales: { y: { beginAtZero: false } }
+  myHistoryChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '총 자산 추이',
+        data: data,
+        borderColor: '#4f46e5',
+        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+        fill: true,
+        tension: 0.3, // 곡선 완만하게
+        pointRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false, // [중요] 애니메이션을 꺼야 루프에 안 빠짐
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          ticks: {
+            callback: (val) => val.toLocaleString() + '원'
+          }
         }
-    });
+      }
+    }
+  });
 }
 
 /* =========================
-   📅 스냅샷 저장 (그래프 자동 갱신)
+/* =========================
+   📅 자산 스냅샷 저장 (Daily Update)
 ========================= */
 function saveSnapshot() {
   const history = JSON.parse(localStorage.getItem("history") || "[]");
   const now = new Date();
-  const today = `${now.getMonth() + 1}/${now.getDate()}`;
+  // '2024-05-20' 형식으로 날짜 고정 (Daily 기준)
+  const today = now.toISOString().split('T')[0]; 
 
+  // 현재 총 자산 계산
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
     let v = (prices[s.symbol] || 0) * s.quantity;
@@ -269,16 +290,27 @@ function saveSnapshot() {
   });
   const totalAssets = Math.round(cash + currentStockValueTotal);
 
+  // 같은 날짜 데이터가 있는지 확인
   const existingIdx = history.findIndex(h => h.date === today);
-  if (existingIdx > -1) history[existingIdx].total = totalAssets;
-  else history.push({ date: today, total: totalAssets });
+  
+  if (existingIdx > -1) {
+    // 오늘 이미 기록했다면 금액만 업데이트
+    history[existingIdx].total = totalAssets;
+  } else {
+    // 새로운 날짜라면 추가
+    history.push({ date: today, total: totalAssets });
+  }
 
-  if (history.length > 14) history.shift();
+  // 최근 30일 데이터만 유지 (선택 사항)
+  if (history.length > 30) history.shift();
 
   localStorage.setItem("history", JSON.stringify(history));
+  
+  // [중요] 렌더링 순서: 데이터 저장 -> 화면 텍스트 갱신 -> 차트 갱신
   renderHistory();
-  renderHistoryChart(); // 그래프 즉시 반영
-  alert(`오늘의 자산(${totalAssets.toLocaleString()}원)이 기록되었습니다.`);
+  renderHistoryChart(); 
+  
+  alert(`[${today}] 자산이 기록되었습니다: ${totalAssets.toLocaleString()}원`);
 }
 
 function renderHistory() {
