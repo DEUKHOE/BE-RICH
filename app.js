@@ -1,827 +1,463 @@
-let stocks = [];
-let prices = {};
-let barChart;
-let pieChart;
+/* =========================
+   변수 및 초기화 설정
+========================= */
+let stocks = JSON.parse(localStorage.getItem("stocks") || "[]");
+let prices = JSON.parse(localStorage.getItem("prices") || "{}");
+let cash = Number(localStorage.getItem("cash") || 0);
+let exchangeRate = 1350;
+let barChart, pieChart, historyChart;
 let colorMap = {};
-let cash = 0;
-let exchangeRate = 1300;
 
-
-function getToday() {
-  return new Date().toISOString().split("T")[0];
-}
-
-
-function autoSaveSnapshot() {
-  const history = JSON.parse(localStorage.getItem("history") || "[]");
-
-  const today = new Date().toISOString().split("T")[0];
-  const total = calculateTotal();
-
-  const existing = history.find(h => h.date === today);
-
-  if (existing) {
-    // 오늘 이미 있으면 덮어쓰기
-    existing.total = total;
-  } else {
-    // 없으면 추가
-    history.push({
-      date: today,
-      total
-    });
-  }
-
-  localStorage.setItem("history", JSON.stringify(history));
-}
-
-
-function getTotalAssets(values) {
-  return values.reduce((sum, v) => sum + v, 0);
-}
-
-function saveCash() {
-  localStorage.setItem("cash", cash);
-}
-
-function loadCash() {
-  cash = Number(localStorage.getItem("cash") || 0);
-}
-
-function getColor(symbol) {
-  if (colorMap[symbol]) return colorMap[symbol];
-
-  const colors = [
-    "#4f46e5",
-    "#06b6d4",
-    "#22c55e",
-    "#f59e0b",
-    "#ef4444",
-    "#a855f7",
-    "#14b8a6",
-    "#f97316"
-  ];
-
-  const color = colors[Object.keys(colorMap).length % colors.length];
-  colorMap[symbol] = color;
-
-  return color;
-}
+const PROXY_URL = "https://corsproxy.io/?";
 
 /* =========================
-   🌍 환율 가져오기
+   초기 로드 (init) 수정
+========================= */
+async function init() {
+  loadCash();
+  await getExchangeRate();
+  if (stocks.length > 0) {
+    await refreshPrices();
+  }
+  
+/* =========================
+   탭 전환 함수 (UI 보강)
+========================= */
+function showTab(tab) {
+  const assetTab = document.getElementById("asset-tab");
+  const newsTab = document.getElementById("news-tab");
+  const assetBtn = document.getElementById("asset-btn");
+  const newsBtn = document.getElementById("news-btn");
+
+  if (tab === "asset") {
+    assetTab.style.display = "block";
+    newsTab.style.display = "none";
+    assetBtn.classList.add("active"); // CSS 클래스 활용 권장
+    assetBtn.style.color = "#4f46e5";
+    newsBtn.style.color = "#999";
+  } else {
+    assetTab.style.display = "none";
+    newsTab.style.display = "block";
+    assetBtn.style.color = "#999";
+    newsBtn.style.color = "#4f46e5";
+    renderNewsStockList(); // 뉴스 탭 클릭 시 리스트 갱신
+  }
+}
+
+
+/* =========================
+   🌍 환율 및 시세 데이터
 ========================= */
 async function getExchangeRate() {
   try {
     const res = await fetch("https://open.er-api.com/v6/latest/USD");
     const data = await res.json();
-
     exchangeRate = data.rates.KRW;
-
     const el = document.getElementById("exchange-rate");
-    if (el) {
-      el.innerText =
-        "환율: 1 USD = " + exchangeRate.toLocaleString() + " KRW";
-    }
+    if (el) el.innerText = `환율: 1 USD = ${exchangeRate.toLocaleString()} KRW`;
   } catch (err) {
-    console.error("환율 실패:", err);
+    console.error("환율 로드 실패", err);
   }
 }
 
 /* =========================
-   📈 주식 가격 가져오기
+   🌍 시세 데이터 가져오기 (원화/달러 자동 판별)
 ========================= */
 async function getPrice(symbol) {
+  const API_KEY = '831c116330c04eedb39cc260b03e7ba8'; 
+  const url = `https://api.twelvedata.com/price?symbol=${symbol}&apikey=${API_KEY}`;
+
   try {
-    // 🇰🇷 한국 주식
-    if (symbol.endsWith(".KS")) {
-      const res = await fetch(
-        `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`
-      );
-      const data = await res.json();
-      const result = data.quoteResponse.result[0];
-
-      if (!result) return null;
-
-      return {
-        price: result.regularMarketPrice,
-        currency: "KRW",
-      };
-    }
-
-    // 🌍 해외 주식
-    const API_KEY = "5FREZBJ18A6Y6PXY";
-
-    const res = await fetch(
-      `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${API_KEY}`
-    );
-
+    const res = await fetch(url);
     const data = await res.json();
-    const price = data["Global Quote"]?.["05. price"];
+    
+    if (data.status === "error" || !data.price) return null;
 
-    if (!price) return null;
+    const upperSymbol = symbol.toUpperCase();
+    // KRW 포함 여부 또는 한국 거래소(.KS, .KQ) 여부 확인
+    const isKRW = upperSymbol.includes("KRW") || upperSymbol.includes(".KS") || upperSymbol.includes(".KQ");
 
     return {
-      price: Number(price),
-      currency: "USD",
+      price: parseFloat(data.price),
+      currency: isKRW ? "KRW" : "USD"
     };
   } catch (err) {
-    console.error(err);
+    console.error("API 에러:", err);
     return null;
   }
 }
 
+
 /* =========================
-   ➕ 종목 추가
+   ➕ 종목 추가 및 관리
 ========================= */
 async function addStock() {
-  const symbol = document.getElementById("symbol").value;
-  const quantity = Number(document.getElementById("quantity").value);
+  const symbolInput = document.getElementById("symbol");
+  const qtyInput = document.getElementById("quantity");
+  const buyInput = document.getElementById("buyPrice");
 
-const raw = document.getElementById("buyPrice").value;
-const buyPrice = Number(raw);
+  const symbol = symbolInput.value.toUpperCase().trim();
+  const quantity = Number(qtyInput.value);
+  const buyPrice = Number(buyInput.value);
 
-if (raw === "" || isNaN(buyPrice)) {
-  alert("값을 정확히 입력하세요");
-  return;
-}
-
+  if (!symbol || quantity <= 0) return alert("올바른 값을 입력하세요.");
 
   const quote = await getPrice(symbol);
-  if (!quote) {
-    alert("종목을 찾을 수 없음");
-    return;
-  }
+  if (!quote) return alert("존재하지 않는 종목이거나 데이터를 가져올 수 없습니다.");
 
   stocks.push({
     symbol,
     quantity,
     buyPrice,
-    currency: quote.currency,
+    currency: quote.currency
   });
 
   prices[symbol] = quote.price;
-
-
-  savePrices();
+  
   saveStocks();
-
+  savePrices();
+  
+  // 입력창 초기화
+  symbolInput.value = "";
+  qtyInput.value = "";
+  buyInput.value = "";
+  
   render();
 }
 
+function updateQuantity(index, value) {
+  stocks[index].quantity = Number(value);
+  saveStocks();
+  renderCharts(); // 차트만 즉시 갱신 (성능)
+  updateTotalAndProfit(); 
+}
+
+function updateBuyPrice(index, value) {
+  stocks[index].buyPrice = Number(value);
+  saveStocks();
+  render();
+}
 /* =========================
-   💰 총 자산 계산
+   🎨 UI 렌더링 (개별 종목 계산 수정)
 ========================= */
-function calculateTotal() {
-  let total = cash; // ⭐ 현금 포함
-
-  stocks.forEach((stock) => {
-    let value = stock.quantity * prices[stock.symbol];
-
-    if (stock.currency === "USD") {
-      value *= exchangeRate;
-    }
-
-    total += value;
-  });
-
-  return Math.round(total);
-}
-
-function calculateProfit() {
-  let invested = 0;
-  let current = 0;
-
-  stocks.forEach(s => {
-    const priceNow = prices[s.symbol];
-    if (!priceNow || isNaN(priceNow)) return;
-    const buyPrice = s.buyPrice;
-
-    // ⭐ 방어
-    if (!priceNow || !buyPrice || isNaN(priceNow) || isNaN(buyPrice)) return;
-
-    let buy = buyPrice * s.quantity;
-    let now = priceNow * s.quantity;
-
-    if (s.currency === "USD") {
-      buy *= exchangeRate;
-      now *= exchangeRate;
-    }
-
-    invested += buy;
-    current += now;
-  });
-
-  const profit = current - invested;
-  const percent = invested > 0 ? (profit / invested) * 100 : 0;
-
-  return { invested, current, profit, percent };
-}
-
-function renderProfit() {
-  const { profit, percent } = calculateProfit();
-
-  const el = document.getElementById("profit");
-
-  if (!el) return;
-
- el.innerText =
-  `수익: ${Math.floor(profit).toLocaleString()}원 (${percent.toFixed(1)}%)`;
-}
-
-
-function getStockProfits() {
-  return stocks.map(s => {
-    const priceNow = prices[s.symbol];
-
-    if (!priceNow || !s.buyPrice) return null;
-
-    const buyTotal = s.buyPrice * s.quantity;
-    const nowTotal = priceNow * s.quantity;
-
-    const profit = s.currency === "USD"
-      ? (nowTotal - buyTotal) * exchangeRate
-      : (nowTotal - buyTotal);
-
-    const percent = buyTotal > 0
-      ? (profit / (buyTotal * (s.currency === "USD" ? exchangeRate : 1))) * 100
-      : 0;
-
-    return {
-      symbol: s.symbol,
-      profit,
-      percent
-    };
-  }).filter(Boolean);
-}
-
-function renderStockProfit() {
-  const list = document.getElementById("stock-profit-list");
+function render() {
+  const list = document.getElementById("stock-list");
   if (!list) return;
-
-  const data = getStockProfits();
-
   list.innerHTML = "";
 
-  data.forEach(item => {
+  stocks.forEach((stock, index) => {
+    const currentPrice = prices[stock.symbol] || 0;
+    const isUSD = stock.currency === "USD"; // 저장된 통화 정보 확인
+    
+    // 계산 로직
+    const buyTotal = stock.buyPrice * stock.quantity;
+    const currentTotal = currentPrice * stock.quantity;
+    const profit = currentTotal - buyTotal;
+    
+    // ⭐ USD일 때만 환율 곱하기
+    const profitKRW = isUSD ? profit * exchangeRate : profit;
+    const percent = buyTotal > 0 ? (profit / buyTotal) * 100 : 0;
+    const color = profit >= 0 ? "#ef4444" : "#3b82f6";
+
     const div = document.createElement("div");
-
-    const color = item.profit >= 0 ? "green" : "red";
-
+    div.className = "stock-card";
+    div.style = "border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:12px; background:#fff; position:relative;";
+    
     div.innerHTML = `
-      <div style="color:${color}">
-        ${item.symbol}  
-        ${item.percent.toFixed(2)}%  
-        (${item.profit.toLocaleString()}원)
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <strong style="font-size:1.1rem;">${stock.symbol}</strong>
+        <input type="checkbox" class="select-stock" data-index="${index}">
+      </div>
+      <div style="font-size:0.9rem; color:#666;">
+        수량: <input type="number" value="${stock.quantity}" onchange="updateQuantity(${index}, this.value)" style="width:50px; border:1px solid #eee;">
+        매입가: <input type="number" value="${stock.buyPrice}" onchange="updateBuyPrice(${index}, this.value)" style="width:80px; border:1px solid #eee;"> <b>${stock.currency}</b>
+      </div>
+      <div style="margin-top:10px; font-weight:bold; color:${color}">
+        수익: ${Math.floor(profitKRW).toLocaleString()}원 (${percent.toFixed(2)}%)
+      </div>
+      <div style="font-size:0.8rem; color:#999; margin-top:5px;">
+        현재가: ${currentPrice.toLocaleString()} ${stock.currency}
       </div>
     `;
-
+    
+    div.onclick = (e) => {
+      if(e.target.tagName !== 'INPUT') {
+        showTab('news');
+        renderNews(stock.symbol);
+      }
+    };
     list.appendChild(div);
   });
-}
 
-
-
-/* =========================
-   📊 그래프
-========================= */
-function renderCharts() {
-  // 1️⃣ 라벨 (주식)
-  const labels = stocks.map(s => s.symbol);
-
-  // 2️⃣ 값 계산 (주식 + 현금용)
-  const stockValues = stocks.map(s => {
-    const price = prices[s.symbol];
-    if (!price) return 0;
-
-    const value = s.quantity * price;
-
-    return s.currency === "USD"
-      ? value * exchangeRate
-      : value;
-  });
-
-  // 💰 현금 추가
-  const allLabels = [...labels];
-  const allValues = [...stockValues];
-  const colors = stocks.map(s => getColor(s.symbol));
-
-  if (cash > 0) {
-    allLabels.push("💰 현금");
-    allValues.push(cash);
-    colors.push("#facc15");
-  }
-
-    const allValuesInt = allValues.map(v => Math.floor(v));
-
-  // 3️⃣ 전체 자산
-  const finalTotal = allValues.reduce((a, b) => a + b, 0);
-
-  // 4️⃣ 퍼센트 라벨 생성 (핵심)
-  const labelsWithPercent = allLabels.map((label, i) => {
-    const percent = finalTotal > 0
-      ? ((allValues[i] / finalTotal) * 100).toFixed(1)
-      : 0;
-
-    return `${label} (${percent}%)`;
-  });
-
-  // 5️⃣ 차트 초기화
-  if (barChart) barChart.destroy();
-  if (pieChart) pieChart.destroy();
-
-  const ctxBar = document.getElementById("barChart");
-  const ctxPie = document.getElementById("pieChart");
-
-  if (!ctxBar || !ctxPie) return;
-
-  // 📊 막대 그래프
-  barChart = new Chart(ctxBar, {
-    type: "bar",
-    data: {
-      labels: labelsWithPercent,
-      datasets: [{
-        label: `총 자산: ${Math.floor(finalTotal).toLocaleString()}원`,
-        data: allValuesInt,
-        backgroundColor: colors
-      }]
-    },
-    options: {
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-                const value = Math.floor(context.raw);
-                const percent = Math.floor((value / finalTotal) * 100);
-
-                return `${value.toLocaleString()}원 (${percent}%)`;
-                }
-          }
-        }
-      }
-    }
-  });
-
-  // 🥧 원형 그래프
-  pieChart = new Chart(ctxPie, {
-    type: "pie",
-    data: {
-      labels: labelsWithPercent,
-      datasets: [{
-        data: allValuesInt,
-        backgroundColor: colors
-      }]
-    },
-    options: {
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              const value = context.raw;
-              const percent = finalTotal > 0
-                ? ((value / finalTotal) * 100).toFixed(1)
-                : 0;
-
-              return `${Math.floor(value).toLocaleString()}원 (${Math.floor(percent)}%)`;
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-function setCash() {
-  const value = Number(document.getElementById("cashInput").value);
-
-  cash = value;
-
-  saveCash();
-  render();
-}
-
-
-/* =========================
-   🎨 화면 렌더링
-========================= */
-async function render() {
-  await refreshPrices(); // ⭐ 핵심 추가
-  const list = document.getElementById("stock-list");
-  list.innerHTML = "";
-
-stocks.forEach((stock, index) => {
-  const price = prices[stock.symbol] || 0;
-
-  const nowValue = price * stock.quantity;
-  const buyValue = stock.buyPrice * stock.quantity;
-
-  const nowKRW = stock.currency === "USD"
-    ? nowValue * exchangeRate
-    : nowValue;
-
-  const buyKRW = stock.currency === "USD"
-    ? buyValue * exchangeRate
-    : buyValue;
-
-const profit = Math.floor(nowKRW - buyKRW);
-const percentRaw = buyKRW > 0 ? (profit / buyKRW) * 100 : 0;
-const percent = Number(percentRaw.toFixed(1));
-  const div = document.createElement("div");
-
-  const color = profit >= 0 ? "#22c55e" : "#ef4444";
-
-div.innerHTML = `
-  <div style="border:1px solid #ddd; padding:12px; margin:8px; border-radius:10px;">
-
-    <input type="checkbox" class="select-stock" data-index="${index}" />
-
-    <strong>${stock.symbol}</strong><br/>
-
-    <!-- ✔ 수정 가능 -->
-    수량:
-    <input type="number"
-      value="${stock.quantity}"
-      onchange="updateQuantity(${index}, this.value)"
-      style="width:60px;" />
-
-    <br/>
-
-    매입가:
-    <input type="number"
-      value="${stock.buyPrice}"
-      onchange="updateBuyPrice(${index}, this.value)"
-      style="width:80px;" />
-
-    <br/>
-
-    현재가: ${price}<br/>
-
-    <span style="color:${color}">
-      수익: ${profit.toLocaleString()}원 (${percent}%)
-    </span>
-
-  </div>
-`;
-
-  // 👉 뉴스 연결 (나중 단계)
-  div.onclick = () => renderNews(stock.symbol);
-
-  list.appendChild(div);
-});
-
-const total = Math.floor(calculateTotal());
-
-document.getElementById("total").innerText =
-  "총 자산: " + total.toLocaleString() + "원";
-
+  updateTotalAndProfit();
   renderCharts();
-  renderProfit();
-  renderStockProfit();
   renderNewsStockList();
 }
 
 /* =========================
-   ✏️ 수량 수정
+   💰 총 자산 및 수익 계산 (환율 중복 방지)
 ========================= */
-function updateQuantity(index, value) {
-  stocks[index].quantity = Number(value);
+function updateTotalAndProfit() {
+  let totalAssets = cash; 
+  let totalInvested = 0;
+  let currentStockValue = 0;
 
-  saveStocks();
+  stocks.forEach(s => {
+    const price = prices[s.symbol] || 0;
+    const isUSD = s.currency === "USD"; 
+    
+    let buyValue = s.buyPrice * s.quantity;
+    let nowValue = price * s.quantity;
 
-  clearTimeout(window.renderTimer);
-  window.renderTimer = setTimeout(() => {
-    render();
-  }, 100);
-}
-
-/* =========================
-   🗑 선택 삭제
-========================= */
-function deleteSelected() {
-  const checkboxes = document.querySelectorAll(".select-stock");
-
-  stocks = stocks.filter((_, i) => {
-    const cb = [...checkboxes].find(c => Number(c.dataset.index) === i);
-    return !(cb && cb.checked);
-  });
-
-  saveStocks();
-  render();
-}
-
-/* =========================
-   💾 저장 / 불러오기
-========================= */
-function saveStocks() {
-  localStorage.setItem("stocks", JSON.stringify(stocks));
-}
-
-function loadStocks() {
-  stocks = JSON.parse(localStorage.getItem("stocks") || "[]");
-}
-
-function savePrices() {
-  localStorage.setItem("prices", JSON.stringify(prices));
-}
-
-function loadPrices() {
-  prices = JSON.parse(localStorage.getItem("prices") || "{}");
-}
-
-function loadHistory() {
-  return JSON.parse(localStorage.getItem("history") || "[]");
-}
-
-/* =========================
-   📊 히스토리
-========================= */
-function saveSnapshot() {
-  const history = JSON.parse(localStorage.getItem("history") || "[]");
-
-  const total = calculateTotal();
-
-  if (!total || isNaN(total)) return; // ⭐ 방어
-
-  history.push({
-    date: new Date().toISOString().split("T")[0],
-    total: Number(total)
-  });
-
-  localStorage.setItem("history", JSON.stringify(history));
-}
-
-function renderHistory() {
-  const history = JSON.parse(localStorage.getItem("history") || "[]");
-  const ul = document.getElementById("history");
-
-  ul.innerHTML = "";
-
-  history.forEach(item => {
-    if (!item || typeof item.total !== "number") return; // ⭐ 핵심 방어
-
-    const li = document.createElement("li");
-    li.innerText = `${item.date} - ${item.total.toLocaleString()}원`;
-    ul.appendChild(li);
-  });
-}
-
-
-let historyChart;
-
-function renderHistoryChart() {
-  const history = loadHistory();
-
-  const today = new Date().toISOString().split("T")[0];
-
-  // ⭐ 같은 날짜는 마지막 값만 남기기
-  const filtered = [];
-
-  history.forEach(item => {
-    if (!item || !item.date) return;
-
-    const existing = filtered.find(h => h.date === item.date);
-
-    if (existing) {
-      existing.total = item.total; // 덮어쓰기
-    } else {
-      filtered.push(item);
+    // ⭐ USD일 때만 환율 적용 (KRW 종목은 그대로 합산)
+    if (isUSD) {
+      buyValue *= exchangeRate;
+      nowValue *= exchangeRate;
     }
+
+    totalInvested += buyValue;
+    currentStockValue += nowValue;
   });
 
-  const labels = filtered.map(h => h.date);
-  const data = filtered.map(h => h.total);
+  totalAssets += currentStockValue;
+  const totalProfit = currentStockValue - totalInvested;
+  const totalPercent = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
 
-  if (historyChart) historyChart.destroy();
+  document.getElementById("total").innerText = `총 자산: ${Math.floor(totalAssets).toLocaleString()}원`;
+  const profitEl = document.getElementById("profit");
+  profitEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
+  profitEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent.toFixed(2)}%)`;
+}
 
-  const ctx = document.getElementById("historyChart");
-  if (!ctx) return;
 
-  historyChart = new Chart(ctx, {
-    type: "line",
+/* =========================
+   📰 뉴스 기능 (뉴스 탭)
+========================= */
+function fallbackKeyword(symbol) {
+  const map = {
+    "AAPL": "Apple", "TSLA": "Tesla", "NVDA": "NVIDIA", "MSFT": "Microsoft",
+    "GOOGL": "Alphabet", "AMZN": "Amazon", "META": "Meta Platforms",
+    "005930.KS": "Samsung Electronics", "000660.KS": "SK Hynix"
+  };
+  return map[symbol] || symbol;
+}
+
+async function renderNews(symbol) {
+  const newsEl = document.getElementById("news");
+  newsEl.innerHTML = `<div class="loading">🔍 ${symbol} 관련 뉴스를 찾는 중...</div>`;
+
+  const keyword = fallbackKeyword(symbol);
+  const API_KEY = "9a5356806279fa3e87a387d4c1fe6a14"; // GNews
+  
+  try {
+    const res = await fetch(`https://gnews.io/api/v4/search?q=${keyword}&lang=ko&max=5&apikey=${API_KEY}`);
+    const data = await res.json();
+    
+    newsEl.innerHTML = `<h3>📰 ${keyword} 최신 뉴스</h3>`;
+    
+    if (!data.articles || data.articles.length === 0) {
+      newsEl.innerHTML += "<p>검색된 뉴스가 없습니다.</p>";
+      return;
+    }
+
+    data.articles.forEach(a => {
+      const item = document.createElement("div");
+      item.style = "margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:10px;";
+      item.innerHTML = `
+        <a href="${a.url}" target="_blank" style="text-decoration:none; color:#333; font-weight:bold;">${a.title}</a>
+        <p style="font-size:0.8rem; color:#666; margin:5px 0;">${a.description.substring(0, 80)}...</p>
+        <span style="font-size:0.7rem; color:#999;">${a.source.name} · ${a.publishedAt.split("T")[0]}</span>
+      `;
+      newsEl.appendChild(item);
+    });
+  } catch (err) {
+    newsEl.innerHTML = "<p>뉴스 로드 중 오류가 발생했습니다.</p>";
+  }
+}
+
+/* =========================
+   📊 차트 및 기타 기능
+========================= */
+function renderCharts() {
+  const ctxBar = document.getElementById("barChart");
+  const ctxPie = document.getElementById("pieChart");
+  if (!ctxBar || !ctxPie) return;
+
+  const labels = stocks.map(s => s.symbol);
+  const values = stocks.map(s => {
+    let val = (prices[s.symbol] || 0) * s.quantity;
+    return s.currency === "USD" ? val * exchangeRate : val;
+  });
+
+  if (cash > 0) {
+    labels.push("현금");
+    values.push(cash);
+  }
+
+  const colors = labels.map(l => getColor(l));
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(ctxBar, {
+    type: 'bar',
     data: {
       labels,
+      datasets: [{ label: '자산 가치(원)', data: values, backgroundColor: colors }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } } }
+  });
+
+  if (pieChart) pieChart.destroy();
+  pieChart = new Chart(ctxPie, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors }]
+    },
+    options: { responsive: true }
+  });
+}
+
+function renderHistoryChart() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const ctx = document.getElementById("historyChart");
+  if (!ctx || history.length === 0) return;
+
+  if (historyChart) historyChart.destroy();
+  historyChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: history.map(h => h.date),
       datasets: [{
-        label: "자산 변화",
-        data,
-        borderColor: "#4f46e5",
-        backgroundColor: "rgba(79, 70, 229, 0.2)",
+        label: '총 자산 추이',
+        data: history.map(h => h.total),
+        borderColor: '#4f46e5',
+        tension: 0.2,
         fill: true,
-        tension: 0.3
+        backgroundColor: 'rgba(79, 70, 229, 0.1)'
       }]
     }
   });
 }
 
+// 헬퍼 함수들
+function saveStocks() { localStorage.setItem("stocks", JSON.stringify(stocks)); }
+function savePrices() { localStorage.setItem("prices", JSON.stringify(prices)); }
+function loadStocks() { stocks = JSON.parse(localStorage.getItem("stocks") || "[]"); }
+function loadPrices() { prices = JSON.parse(localStorage.getItem("prices") || "{}"); }
+function loadCash() { cash = Number(localStorage.getItem("cash") || 0); }
+function saveCash() { localStorage.setItem("cash", cash); }
 
-async function getNews(keyword) {
-  const API_KEY = "9a5356806279fa3e87a387d4c1fe6a14";
+function setCash() {
+  cash = Number(document.getElementById("cashInput").value);
+  saveCash();
+  render();
+}
 
-  try {
-    const res = await fetch(
-      `https://gnews.io/api/v4/search?q=${keyword}&lang=en&max=10&apikey=${API_KEY}`
-    );
+function deleteSelected() {
+  const checkboxes = document.querySelectorAll(".select-stock");
+  stocks = stocks.filter((_, i) => !checkboxes[i].checked);
+  saveStocks();
+  render();
+}
 
-    const data = await res.json();
-
-    console.log("뉴스 응답:", data);
-
-    return data.articles || [];
-
-  } catch (err) {
-    console.error(err);
-    return [];
+function resetAll() {
+  if (confirm("정말 초기화하시겠습니까?")) {
+    localStorage.clear();
+    location.reload();
   }
 }
 
-
-async function renderNews(symbol) {
-  const newsEl = document.getElementById("news");
-
-  newsEl.innerHTML = `<p>🔍 ${symbol} 뉴스 불러오는 중...</p>`;
-
-  let articles = await getNews(symbol);
-
-  if (articles.length === 0) {
-    articles = await getNews(fallbackKeyword(symbol));
-  }
-
-  newsEl.innerHTML = `<h4>📰 ${symbol} 뉴스</h4>`;
-
-  if (!articles.length) {
-    newsEl.innerHTML += "<p>뉴스 없음</p>";
-    return;
-  }
-
-  articles.forEach(a => {
-    const div = document.createElement("div");
-
-    div.innerHTML = `
-      <div style="
-        border:1px solid #eee;
-        padding:10px;
-        margin:10px 0;
-        border-radius:10px;
-      ">
-        ${a.image ? `
-          <img src="${a.image}"
-            style="width:100%; max-height:120px; object-fit:cover; border-radius:8px;">
-        ` : ""}
-
-        <a href="${a.url}" target="_blank"
-          style="font-weight:bold; text-decoration:none;">
-          ${a.title}
-        </a>
-
-        <div style="font-size:12px; color:gray;">
-          ${a.source.name} · ${a.publishedAt.split("T")[0]}
-        </div>
-      </div>
-    `;
-
-    newsEl.appendChild(div);
-  });
-}
-
-function fallbackKeyword(symbol) {
-  const map = {
-    "NVDA": "NVIDIA",
-    "AAPL": "Apple",
-    "TSLA": "Tesla",
-    "MSFT": "Microsoft",
-    "005930.KS": "Samsung Electronics"
-  };
-
-  return map[symbol] || symbol;
-}
-
-function fallbackKeyword(symbol) {
-  if (symbol.includes(".KS")) return "삼성전자";
-  if (symbol === "AAPL") return "Apple";
-  if (symbol === "TSLA") return "Tesla";
-  if (symbol === "MSFT") return "Microsoft";
-  return symbol;
+function getColor(s) {
+  if (s === "현금") return "#facc15";
+  if (!colorMap[s]) colorMap[s] = `hsl(${Math.random() * 360}, 70%, 60%)`;
+  return colorMap[s];
 }
 
 function showTab(tab) {
-  document.getElementById("asset-tab").style.display =
-    tab === "asset" ? "block" : "none";
-
-  document.getElementById("news-tab").style.display =
-    tab === "news" ? "block" : "none";
-
-  // 👇 선택된 탭 강조
-  document.querySelectorAll("#tabbar button").forEach(btn => {
-    btn.style.color = "#999";
-  });
-
-  document.getElementById(tab + "-btn").style.color = "#4f46e5";
+  document.getElementById("asset-tab").style.display = tab === "asset" ? "block" : "none";
+  document.getElementById("news-tab").style.display = tab === "news" ? "block" : "none";
+  document.getElementById("asset-btn").style.color = tab === "asset" ? "#4f46e5" : "#999";
+  document.getElementById("news-btn").style.color = tab === "news" ? "#4f46e5" : "#999";
 }
 
-
+/* =========================
+   뉴스 탭: 보유 자산 카드 리스트 렌더링
+========================= */
 function renderNewsStockList() {
-  const el = document.getElementById("news-stock-list");
-  el.innerHTML = "";
+  const container = document.getElementById("news-stock-list");
+  if (!container) return;
+  container.innerHTML = "";
 
-  stocks.forEach(stock => {
-    const div = document.createElement("div");
+  if (stocks.length === 0) {
+    container.innerHTML = "<p style='text-align:center; color:#999; padding:20px;'>보유 중인 주식이 없습니다.</p>";
+    return;
+  }
 
-    div.innerHTML = `
-      <div style="
-        border:1px solid #ddd;
-        padding:12px;
-        margin:8px 0;
-        border-radius:10px;
-        cursor:pointer;
-        background:white;
-        box-shadow:0 2px 6px rgba(0,0,0,0.05);
-        font-weight:bold;
-      ">
-        📈 ${stock.symbol}
+  stocks.forEach(s => {
+    const card = document.createElement("div");
+    card.className = "news-stock-card";
+    card.style = `
+      padding: 15px; 
+      margin-bottom: 10px; 
+      background: #f8fafc; 
+      border: 1px solid #e2e8f0; 
+      border-radius: 12px; 
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    `;
+    
+    card.innerHTML = `
+      <div>
+        <strong style="font-size:1.1rem;">${s.symbol}</strong>
+        <span style="font-size:0.8rem; color:#666; margin-left:10px;">뉴스 보기 &gt;</span>
       </div>
     `;
-
-    // 👉 클릭 이벤트 (핵심)
-    div.onclick = () => renderNews(stock.symbol);
-
-    el.appendChild(div);
+    
+    // 카드 클릭 시 해당 종목 뉴스 로드
+    card.onclick = () => renderNews(s.symbol);
+    container.appendChild(card);
   });
 }
 
 
-/* =========================
-   🔄 초기화
-========================= */
-function resetAll() {
-  if (!confirm("전체 삭제할까요?")) return;
 
-  stocks = [];
-  prices = {};
+function autoSaveSnapshot() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const today = new Date().toISOString().split("T")[0];
+  
+  // 총 자산 계산 (현금 + 현재 주식 가치)
+  let currentStockValue = 0;
+  stocks.forEach(s => {
+    let val = (prices[s.symbol] || 0) * s.quantity;
+    if (s.currency === "USD") val *= exchangeRate;
+    currentStockValue += val;
+  });
+  const total = Math.round(cash + currentStockValue);
 
-  localStorage.clear();
+  const idx = history.findIndex(h => h.date === today);
+  if (idx > -1) history[idx].total = total;
+  else history.push({ date: today, total });
 
-  render();
-  renderHistory();
+  localStorage.setItem("history", JSON.stringify(history));
 }
 
-function updateBuyPrice(index, value) {
-  const num = Number(value);
-
-  if (value === "" || isNaN(num)) {
-    alert("값을 정확히 입력하세요");
-    return;
-  }
-
-  stocks[index].buyPrice = num;
-
-  saveStocks();
-  render();
-}
-
-
-function updateBuyPrice(index, value) {
-  const num = Number(value);
-
-  if (value === "" || isNaN(num)) {
-    alert("값을 정확히 입력하세요");
-    return;
-  }
-
-  stocks[index].buyPrice = num;
-
-  saveStocks();
-
-  // ⭐ 핵심: 반드시 render
-  render();
-}
-
-async function refreshPrices() {
-  for (let stock of stocks) {
-    const quote = await getPrice(stock.symbol);
-    if (quote) {
-      prices[stock.symbol] = quote.price;
-    }
-  }
-}
-
-/* =========================
-   🚀 시작
-========================= */
-async function init() {
-  await getExchangeRate();
-
-  loadCash();
-  loadPrices();
-  loadStocks();
-
-  await render();
-  renderHistory();
-
-  // ⭐ 핵심: 오늘 데이터만 자동 갱신
+function saveSnapshot() {
   autoSaveSnapshot();
-
-  setTimeout(renderHistoryChart, 0);
+  renderHistory();
+  renderHistoryChart();
+  alert("오늘의 자산 현황이 기록되었습니다.");
 }
 
+function renderHistory() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const el = document.getElementById("history");
+  if (!el) return;
+  el.innerHTML = history.reverse().slice(0, 5).map(h => 
+    `<li style="font-size:0.9rem; margin-bottom:5px;">${h.date}: <b>${h.total.toLocaleString()}원</b></li>`
+  ).join("");
+}
+
+// 실행
 init();
-
-
-
