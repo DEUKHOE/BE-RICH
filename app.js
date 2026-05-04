@@ -5,9 +5,8 @@ let stocks = JSON.parse(localStorage.getItem("stocks") || "[]");
 let prices = JSON.parse(localStorage.getItem("prices") || "{}");
 let cash = Number(localStorage.getItem("cash") || 0);
 let exchangeRate = 1350;
-let barChart, pieChart;
+let barChart, pieChart, historyChart; // 변동 그래프 변수 추가
 
-// 차트 색상 팔레트 (통일감 유지용)
 const colorPalette = [
   '#10b981', '#4f46e5', '#f59e0b', '#ef4444', '#8b5cf6', 
   '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'
@@ -16,12 +15,11 @@ const colorPalette = [
 async function init() {
   loadCash();
   await getExchangeRate();
-  if (stocks.length > 0) {
-    await refreshPrices();
-  }
+  if (stocks.length > 0) await refreshPrices();
   showTab('asset'); 
-  render();
-  renderHistory();
+  render();           // 메인 렌더링 (리스트 + Bar + Pie)
+  renderHistory();    // 텍스트 히스토리 렌더링
+  renderHistoryChart(); // 자산 추이 그래프 렌더링
 }
 
 /* =========================
@@ -152,7 +150,6 @@ function updateTotalAndProfit(totalAssets) {
     if (s.currency === "USD") bV *= exchangeRate;
     totalInvested += bV;
   });
-
   const currentStockValue = totalAssets - cash;
   const totalProfit = currentStockValue - totalInvested;
   const totalPercent = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
@@ -162,8 +159,9 @@ function updateTotalAndProfit(totalAssets) {
   pEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
   pEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent.toFixed(2)}%)`;
 }
+
 /* =========================
-   📊 차트 (색상 개별 적용 수정본)
+   📊 차트 (색상 통일 및 현금 포함)
 ========================= */
 function renderCharts(totalAssets) {
   const ctxBar = document.getElementById("barChart");
@@ -175,63 +173,23 @@ function renderCharts(totalAssets) {
     let v = (prices[s.symbol] || 0) * s.quantity;
     return s.currency === "USD" ? v * exchangeRate : v;
   })];
-  
-  // 색상 배열 생성
   const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
-  // 1. 막대 차트 수정
   if (barChart) barChart.destroy();
   barChart = new Chart(ctxBar, {
     type: 'bar',
-    data: { 
-      labels, 
-      datasets: [{ 
-        label: '자산 가치(원)',
-        data: values, 
-        backgroundColor: backgroundColors, // 이 부분이 배열로 들어가야 각 막대 색이 달라집니다.
-        borderColor: backgroundColors,
-        borderWidth: 1
-      }] 
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { 
-        legend: { display: false }, // 막대 차트는 범례 숨김
-        tooltip: {
-          callbacks: {
-            label: (item) => `${item.label}: ${Math.floor(item.raw).toLocaleString()}원`
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            callback: (value) => value.toLocaleString() + '원'
-          }
-        }
-      }
-    }
+    data: { labels, datasets: [{ label: '가치(원)', data: values, backgroundColor: backgroundColors }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
   });
 
-  // 2. 원형 차트 수정
   if (pieChart) pieChart.destroy();
   pieChart = new Chart(ctxPie, {
     type: 'pie',
-    data: { 
-      labels, 
-      datasets: [{ 
-        data: values, 
-        backgroundColor: backgroundColors,
-        hoverOffset: 4
-      }] 
-    },
-    options: {
-      responsive: true,
+    data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
+    options: { 
+      responsive: true, 
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom' },
         tooltip: {
           callbacks: {
             label: (item) => {
@@ -244,12 +202,47 @@ function renderCharts(totalAssets) {
     }
   });
 }
+
 /* =========================
-   📅 일일 자산 추이 기록
+   📈 자산 변동 추이 (Line Chart)
+========================= */
+function renderHistoryChart() {
+  const ctxHistory = document.getElementById("historyChart");
+  if (!ctxHistory) return;
+
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const labels = history.map(h => h.date);
+  const data = history.map(h => h.total);
+
+  if (historyChart) historyChart.destroy();
+  historyChart = new Chart(ctxHistory, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '일별 총 자산',
+        data: data,
+        borderColor: '#4f46e5',
+        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+        fill: true,
+        tension: 0.3
+      }]
+    },
+    options: { 
+      responsive: true, 
+      maintainAspectRatio: false,
+      scales: { y: { beginAtZero: false, ticks: { callback: v => v.toLocaleString() + '원' } } }
+    }
+  });
+}
+
+/* =========================
+   📅 히스토리 저장 및 렌더링
 ========================= */
 function saveSnapshot() {
   const history = JSON.parse(localStorage.getItem("history") || "[]");
-  const today = new Date().toLocaleDateString(); // "2026. 5. 4." 형식
+  const now = new Date();
+  const today = `${now.getMonth() + 1}-${now.getDate()}`;
 
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
@@ -260,41 +253,34 @@ function saveSnapshot() {
   const totalAssets = Math.round(cash + currentStockValueTotal);
 
   const existingIdx = history.findIndex(h => h.date === today);
-  if (existingIdx > -1) {
-    history[existingIdx].total = totalAssets;
-  } else {
-    history.push({ date: today, total: totalAssets });
-  }
+  if (existingIdx > -1) history[existingIdx].total = totalAssets;
+  else history.push({ date: today, total: totalAssets });
 
-  // 최근 7일 데이터만 유지
-  if (history.length > 7) history.shift();
+  if (history.length > 14) history.shift();
 
   localStorage.setItem("history", JSON.stringify(history));
   renderHistory();
-  alert("오늘의 자산 현황이 기록되었습니다!");
+  renderHistoryChart();
+  alert(`기록 완료: ${totalAssets.toLocaleString()}원`);
 }
 
 function renderHistory() {
   const history = JSON.parse(localStorage.getItem("history") || "[]");
   const el = document.getElementById("history");
   if (!el) return;
-  
   if (history.length === 0) {
-    el.innerHTML = "<p style='color:#999; font-size:0.9rem;'>기록된 데이터가 없습니다.</p>";
+    el.innerHTML = "<p style='color:#999;'>기록된 데이터가 없습니다.</p>";
     return;
   }
-
   el.innerHTML = history.slice().reverse().map(h => `
     <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #eee;">
-      <span style="color:#666;">${h.date}</span>
-      <span style="font-weight:bold;">${h.total.toLocaleString()}원</span>
+      <span>${h.date}</span>
+      <strong>${h.total.toLocaleString()}원</strong>
     </div>
   `).join("");
 }
 
-/* =========================
-   기타 유틸리티
-========================= */
+/* ... 기타 유틸리티 (saveStocks, savePrices, loadCash, showTab, deleteSelected) 동일 ... */
 function saveStocks() { localStorage.setItem("stocks", JSON.stringify(stocks)); }
 function savePrices() { localStorage.setItem("prices", JSON.stringify(prices)); }
 function saveCash() { localStorage.setItem("cash", cash); }
@@ -305,7 +291,6 @@ function loadCash() {
 function showTab(tab) {
   document.getElementById("asset-tab").style.display = tab === "asset" ? "block" : "none";
   document.getElementById("news-tab").style.display = tab === "news" ? "block" : "none";
-  if(tab === 'news') renderNewsStockList();
 }
 function deleteSelected() {
   const checks = document.querySelectorAll(".select-stock");
