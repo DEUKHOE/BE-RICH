@@ -161,7 +161,17 @@ function updateTotalAndProfit(totalAssets) {
 }
 
 /* =========================
-   📊 차트 (색상 통일 및 현금 포함)
+   📈 차트 관리 (전역 변수)
+========================= */
+// 차트 인스턴스를 저장할 변수들
+let barChartInstance = null;
+let pieChartInstance = null;
+let historyChartInstance = null;
+
+
+
+/* =========================
+   📊 1. 종목 비중 차트 (Bar & Pie)
 ========================= */
 function renderCharts(totalAssets) {
   const ctxBar = document.getElementById("barChart");
@@ -175,36 +185,37 @@ function renderCharts(totalAssets) {
   })];
   const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
-  if (barChart) barChart.destroy();
-  barChart = new Chart(ctxBar, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: '가치(원)', data: values, backgroundColor: backgroundColors }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-  });
+  // [버그 수정] 막대 차트 업데이트
+  if (barChartInstance) {
+    barChartInstance.data.labels = labels;
+    barChartInstance.data.datasets[0].data = values;
+    barChartInstance.data.datasets[0].backgroundColor = backgroundColors;
+    barChartInstance.update('none'); // 애니메이션 없이 업데이트하여 깜빡임 방지
+  } else {
+    barChartInstance = new Chart(ctxBar, {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  }
 
-  if (pieChart) pieChart.destroy();
-  pieChart = new Chart(ctxPie, {
-    type: 'pie',
-    data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
-    options: { 
-      responsive: true, 
-      maintainAspectRatio: false,
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: (item) => {
-              const pct = totalAssets > 0 ? ((item.raw / totalAssets) * 100).toFixed(1) : 0;
-              return ` ${item.label}: ${Math.floor(item.raw).toLocaleString()}원 (${pct}%)`;
-            }
-          }
-        }
-      }
-    }
-  });
+  // [버그 수정] 원형 차트 업데이트
+  if (pieChartInstance) {
+    pieChartInstance.data.labels = labels;
+    pieChartInstance.data.datasets[0].data = values;
+    pieChartInstance.data.datasets[0].backgroundColor = backgroundColors;
+    pieChartInstance.update('none');
+  } else {
+    pieChartInstance = new Chart(ctxPie, {
+      type: 'pie',
+      data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  }
 }
 
 /* =========================
-   📈 자산 변동 그래프 (직관성 강화)
+   📈 2. 자산 추이 그래프 (Line)
 ========================= */
 function renderHistoryChart() {
   const ctx = document.getElementById("historyChart");
@@ -216,38 +227,32 @@ function renderHistoryChart() {
   const labels = history.map(h => h.date);
   const data = history.map(h => h.total);
 
-  if (historyChart) historyChart.destroy();
-
-  historyChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: '총 자산 추이',
-        data: data,
-        borderColor: '#4f46e5',
-        backgroundColor: 'rgba(79, 70, 229, 0.1)',
-        borderWidth: 3,
-        fill: true,
-        tension: 0.4, // 곡선 적용으로 더 직관적으로 변경
-        pointRadius: 4,
-        pointBackgroundColor: '#4f46e5'
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          beginAtZero: false, // 하락/상승폭을 더 크게 보여주기 위해 false
-          ticks: { callback: v => v.toLocaleString() + '원' }
-        }
+  // [버그 수정] 기존 차트가 있으면 데이터만 교체
+  if (historyChartInstance) {
+    historyChartInstance.data.labels = labels;
+    historyChartInstance.data.datasets[0].data = data;
+    historyChartInstance.update();
+  } else {
+    historyChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '총 자산 추이',
+          data: data,
+          borderColor: '#4f46e5',
+          tension: 0.4,
+          fill: true,
+          backgroundColor: 'rgba(79, 70, 229, 0.1)'
+        }]
       },
-      plugins: {
-        legend: { display: false }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: false } }
       }
-    }
-  });
+    });
+  }
 }
 
 
