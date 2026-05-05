@@ -27,7 +27,7 @@
 </header>
 
 <!-- =========================
-     📊 자산 탭
+      📊 자산 탭
 ========================= -->
 <div id="asset-tab">
   <!-- 입력 영역 -->
@@ -35,7 +35,7 @@
     <h3>➕ 종목 추가</h3>
     <div class="input-area">
       <input id="symbol" placeholder="종목 (예: NVDA, 005930.KS)" />
-      <input id="quantity" type="number" placeholder="수량" />
+      <input id="quantity" type="number" step="0.001" placeholder="수량 (예: 0.005)" />
       <input id="buyPrice" type="number" placeholder="평단가" />
       <button class="btn-primary" onclick="addStock()">추가</button>
     </div>
@@ -47,17 +47,15 @@
       <input id="cashInput" type="number" placeholder="보유 현금(원)" />
       <button class="btn-secondary" onclick="setCash()">저장</button>
     </div>
+    <!-- 현금 입출금 섹션 -->
+    <div id="cash-management" style="margin-top:15px; padding-top:15px; border-top:1px solid #eee;">
+      <input type="number" id="cashAmountInput" placeholder="입출금 금액" style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:8px;">
+      <div style="margin-top:10px; display:flex; gap:10px;">
+        <button onclick="adjustCash('plus')" style="flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:8px; font-weight:bold;">➕ 입금</button>
+        <button onclick="adjustCash('minus')" style="flex:1; padding:12px; background:#ef4444; color:white; border:none; border-radius:8px; font-weight:bold;">➖ 출금</button>
+      </div>
+    </div>
   </div>
-
-  <!-- 현금 관리 섹션 -->
-<div id="cash-management" style="background:#fff; padding:15px; border-radius:12px; border:1px solid #ddd; margin-bottom:15px;">
-  <h4 style="margin-top:0;">💵 현금 관리</h4>
-  <input type="number" id="cashAmountInput" placeholder="금액 입력" style="width:70%; padding:8px; border:1px solid #ccc; border-radius:5px;">
-  <div style="margin-top:10px; display:flex; gap:5px;">
-    <button onclick="adjustCash('plus')" style="flex:1; padding:10px; background:#10b981; color:white; border:none; border-radius:5px;">➕ 입금</button>
-    <button onclick="adjustCash('minus')" style="flex:1; padding:10px; background:#ef4444; color:white; border:none; border-radius:5px;">➖ 출금</button>
-  </div>
-</div>
 
   <!-- 총 자산 정보 -->
   <div class="total-card">
@@ -68,20 +66,21 @@
   <!-- 종목 리스트 -->
   <div id="stock-list"></div>
 
-  <!-- 그래프 영역 -->
+  <!-- 그래프 영역 (하나의 ID만 사용하도록 통합) -->
   <div class="card chart-section">
-    <h3>📊 종목별 비중</h3>
-    <div class="chart-container">
+    <h3>📊 자산 비중 (%)</h3>
+    <div class="chart-container" style="position: relative; height:300px; width:100%; margin-bottom: 30px;">
       <canvas id="pieChart"></canvas>
     </div>
-    <div class="chart-container" style="margin-top: 20px;">
+    <div class="chart-container" style="position: relative; height:200px; width:100%;">
       <canvas id="barChart"></canvas>
     </div>
   </div>
 
+  <!-- 자산 변동 추이 -->
   <div class="card chart-section">
     <h3>📈 자산 변동 추이</h3>
-    <div class="chart-container">
+    <div class="chart-container" style="position: relative; height:250px; width:100%;">
       <canvas id="historyChart"></canvas>
     </div>
     <button class="btn-snap" onclick="saveSnapshot()" style="width:100%; margin-top:15px; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; font-weight:bold;">
@@ -97,7 +96,7 @@
 </div>
 
 <!-- =========================
-     📰 뉴스 탭
+      📰 뉴스 탭
 ========================= -->
 <div id="news-tab" style="display:none;">
   <div class="card">
@@ -108,9 +107,9 @@
 </div>
 
 <!-- 하단 관리 버튼 -->
-<div style="padding: 10px; display: flex; gap: 10px;">
-  <button class="btn-delete" onclick="deleteSelected()" style="flex:1;">🗑 선택 삭제</button>
-  <button class="btn-reset" onclick="resetAll()" style="flex:1; background:#999; color:white; border:none; border-radius:8px;">🔥 전체 초기화</button>
+<div style="padding: 10px; display: flex; gap: 10px; margin-bottom: 70px;">
+  <button class="btn-delete" onclick="deleteSelected()" style="flex:1; padding:12px; border-radius:8px; background:#fee2e2; color:#ef4444; border:1px solid #fecaca; font-weight:bold;">🗑 선택 삭제</button>
+  <button class="btn-reset" onclick="resetAll()" style="flex:1; background:#999; color:white; border:none; border-radius:8px; font-weight:bold;">🔥 전체 초기화</button>
 </div>
 
 <!-- 🔘 하단 고정 탭바 -->
@@ -118,6 +117,7 @@
   <button id="asset-btn" class="active" onclick="showTab('asset')">📊 자산</button>
   <button id="news-btn" onclick="showTab('news')">📰 뉴스</button>
 </div>
+
 
 <!-- 서비스 워커 및 스크립트 -->
 <script>
@@ -137,6 +137,6 @@
   }
 </script>
 
-<script src="app.js?v=03"></script>
+<script src="app.js?v=04"></script>
 </body>
 </html>
