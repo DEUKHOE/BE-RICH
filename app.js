@@ -126,6 +126,23 @@ function setCash() {
   render();
 }
 
+// 현금 입출금 처리
+function adjustCash(type) {
+  const amount = Number(document.getElementById("cashAmountInput").value) || 0;
+  if (amount <= 0) return alert("금액을 입력하세요.");
+  
+  if (type === 'plus') {
+    cash += amount;
+  } else if (type === 'minus') {
+    if (cash < amount) return alert("잔액이 부족합니다.");
+    cash -= amount;
+  }
+  
+  saveCash();
+  document.getElementById("cashAmountInput").value = ""; // 입력창 초기화
+  render();
+}
+
 async function addStock() {
   const symbolInput = document.getElementById("symbol");
   const qtyInput = document.getElementById("quantity");
@@ -145,14 +162,28 @@ async function addStock() {
   render();
 }
 
+function editStock(index) {
+  const s = stocks[index];
+  const newQty = prompt(`${s.symbol}의 새로운 수량을 입력하세요:`, s.quantity);
+  const newPrice = prompt(`${s.symbol}의 새로운 평단가를 입력하세요:`, s.buyPrice);
+
+  if (newQty !== null && newPrice !== null) {
+    stocks[index].quantity = Number(newQty);
+    stocks[index].buyPrice = Number(newPrice);
+    saveStocks();
+    render();
+  }
+}
+
 /* =========================
-   🎨 UI 및 비중 렌더링
+   🎨 UI 및 비중 렌더링 (보완 완료)
 ========================= */
 function render() {
   const list = document.getElementById("stock-list");
   if (!list) return;
   list.innerHTML = "";
 
+  // 1. 총 자산 계산
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
     let v = (prices[s.symbol] || 0) * s.quantity;
@@ -161,7 +192,7 @@ function render() {
   });
   const totalAssets = cash + currentStockValueTotal;
 
-  // 현금 비중 표시
+  // 2. 현금 비중 카드 생성
   const cashDiv = document.createElement("div");
   const cashWeight = totalAssets > 0 ? ((cash / totalAssets) * 100).toFixed(1) : 0;
   cashDiv.className = "stock-card";
@@ -175,32 +206,48 @@ function render() {
   `;
   list.appendChild(cashDiv);
 
-  // 종목 카드 리스트
-  stocks.forEach((stock) => {
+  // 3. 종목 카드 리스트 생성 (index 인자 추가로 editStock 오류 해결)
+  stocks.forEach((stock, index) => {
     const currentPrice = prices[stock.symbol] || 0;
     const isUSD = stock.currency === "USD";
+    
+    // 현재 가치 계산 (환율 반영)
     const currentTotal = (currentPrice * stock.quantity) * (isUSD ? exchangeRate : 1);
+    
+    // 비중 계산
     const weight = totalAssets > 0 ? ((currentTotal / totalAssets) * 100).toFixed(1) : 0;
-    const profit = currentTotal - (stock.buyPrice * stock.quantity * (isUSD ? exchangeRate : 1));
-    const percent = (stock.buyPrice > 0) ? (profit / (stock.buyPrice * stock.quantity * (isUSD ? exchangeRate : 1))) * 100 : 0;
+    
+    // 수익 및 수익률 계산
+    const buyTotal = (stock.buyPrice * stock.quantity) * (isUSD ? exchangeRate : 1);
+    const profit = currentTotal - buyTotal;
+    const percent = buyTotal > 0 ? (profit / buyTotal) * 100 : 0;
 
     const div = document.createElement("div");
     div.className = "stock-card";
-    div.style = "border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:12px; background:#fff; cursor:pointer;";
+    div.style = "border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:12px; background:#fff; position:relative;";
+    
+    // 카드 내부 레이아웃
     div.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; justify-content:space-between; align-items:center;" onclick="showTab('news'); renderNews('${stock.symbol}')">
         <strong>${stock.symbol}</strong>
         <span style="font-size:0.8rem; color:#666;">비중 ${weight}%</span>
       </div>
-      <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}">
+      <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}" onclick="showTab('news'); renderNews('${stock.symbol}')">
         수익: ${Math.floor(profit).toLocaleString()}원 (${percent.toFixed(2)}%)
       </div>
-      <input type="checkbox" class="select-stock" style="margin-top:10px;" onclick="event.stopPropagation()">
+      <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+        <!-- 수정 버튼: 클릭 시 카드 클릭 이벤트(뉴스 이동) 방지 -->
+        <button onclick="event.stopPropagation(); editStock(${index})" style="padding:5px 12px; font-size:0.8rem; border:1px solid #4f46e5; background:white; color:#4f46e5; border-radius:6px; cursor:pointer; font-weight:bold;">수정</button>
+        
+        <!-- 삭제용 체크박스 -->
+        <input type="checkbox" class="select-stock" style="margin-left:auto; width:18px; height:18px;" onclick="event.stopPropagation()">
+      </div>
     `;
-    div.onclick = () => { showTab('news'); renderNews(stock.symbol); };
+    
     list.appendChild(div);
   });
 
+  // 4. 하단 총액 및 차트 업데이트
   updateTotalAndProfit(totalAssets);
   renderCharts(totalAssets);
 }
