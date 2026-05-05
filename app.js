@@ -7,39 +7,34 @@ let cash = Number(localStorage.getItem("cash") || 0);
 let exchangeRate = 1350;
 let barChart, pieChart, historyChart; // 변동 그래프 변수 추가
 
+/* =========================
+   📈 차트 인스턴스 전역 관리
+========================= */
+let myBarChart = null;
+let myPieChart = null;
+let myHistoryChart = null;
+
+
+
 const colorPalette = [
   '#10b981', '#4f46e5', '#f59e0b', '#ef4444', '#8b5cf6', 
   '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'
 ];
 
 async function init() {
-    try {
-        loadCash();
-        
-        // 환율 로드 확인
-        await getExchangeRate();
-        const exchangeText = document.getElementById("exchange-rate").innerText;
-        if (exchangeText.includes("로딩")) {
-            throw new Error("환율 데이터를 가져오지 못했습니다.");
-        }
-
-        if (stocks.length > 0) {
-            await refreshPrices();
-        }
-
-        render();
-        renderHistory();
-        renderHistoryChart();
-        showTab('asset');
-    } catch (err) {
-        // 모바일에서 에러 내용을 확인하기 위한 임시 코드
-        alert("앱 초기화 중 에러 발생: " + err.message);
-    }
+  loadCash();
+  await getExchangeRate();
+  if (stocks.length > 0) await refreshPrices();
+  showTab('asset'); 
+  render();           // 메인 렌더링 (리스트 + Bar + Pie)
+  renderHistory();    // 텍스트 히스토리 렌더링
+  renderHistoryChart(); // 자산 추이 그래프 렌더링
 }
 
 /* =========================
    🌍 데이터 통신 및 저장
 ========================= */
+/* 수정된 getExchangeRate */
 async function getExchangeRate() {
   try {
     const res = await fetch("https://open.er-api.com/v6/latest/USD");
@@ -47,7 +42,13 @@ async function getExchangeRate() {
     exchangeRate = data.rates.KRW;
     const el = document.getElementById("exchange-rate");
     if (el) el.innerText = `환율: 1 USD = ${exchangeRate.toLocaleString()} KRW`;
-  } catch (err) { console.error("환율 로드 실패", err); }
+    return data; // [추가] 데이터를 리턴해줘야 await가 확실히 보장됩니다.
+  } catch (err) { 
+    console.error("환율 로드 실패", err); 
+    // 환율 로드 실패 시 기본값이라도 출력해서 로딩 중 멈춤 방지
+    const el = document.getElementById("exchange-rate");
+    if (el) el.innerText = `환율 로드 실패 (기본값: ${exchangeRate}원)`;
+  }
 }
 
 async function getPrice(symbol) {
@@ -175,12 +176,7 @@ function updateTotalAndProfit(totalAssets) {
   pEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent.toFixed(2)}%)`;
 }
 
-/* =========================
-   📈 차트 인스턴스 전역 관리
-========================= */
-let myBarChart = null;
-let myPieChart = null;
-let myHistoryChart = null;
+
 
 /* =========================
    📊 1. 종목 비중 차트 (Bar & Pie)
@@ -235,7 +231,6 @@ function renderCharts() {
    📈 2. 자산 추이 그래프 (Line)
 ========================= */
 // 차트 인스턴스 전역 변수 (중복 생성 방지)
-let myHistoryChart = null;
 
 function renderHistoryChart() {
   const ctx = document.getElementById("historyChart");
