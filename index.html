@@ -49,6 +49,16 @@
     </div>
   </div>
 
+  <!-- 현금 관리 섹션 -->
+<div id="cash-management" style="background:#fff; padding:15px; border-radius:12px; border:1px solid #ddd; margin-bottom:15px;">
+  <h4 style="margin-top:0;">💵 현금 관리</h4>
+  <input type="number" id="cashAmountInput" placeholder="금액 입력" style="width:70%; padding:8px; border:1px solid #ccc; border-radius:5px;">
+  <div style="margin-top:10px; display:flex; gap:5px;">
+    <button onclick="adjustCash('plus')" style="flex:1; padding:10px; background:#10b981; color:white; border:none; border-radius:5px;">➕ 입금</button>
+    <button onclick="adjustCash('minus')" style="flex:1; padding:10px; background:#ef4444; color:white; border:none; border-radius:5px;">➖ 출금</button>
+  </div>
+</div>
+
   <!-- 총 자산 정보 -->
   <div class="total-card">
     <h2 id="total">총 자산: 0원</h2>
@@ -127,6 +137,6 @@
   }
 </script>
 
-<script src="app.js?v=02"></script>
+<script src="app.js?v=03"></script>
 </body>
 </html>
