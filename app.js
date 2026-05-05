@@ -57,6 +57,7 @@ async function init() {
   // init 함수 마지막 부분에 추가
 setInterval(async () => {
     console.log("주가 자동 갱신 중...");
+    await getExchangeRate()
     await refreshPrices();
     render(); // 가격 갱신 후 화면 다시 그리기
 }, 600000); // 600000ms = 10분마다 갱신
@@ -72,22 +73,20 @@ setInterval(async () => {
 async function getExchangeRate() {
   const el = document.getElementById("exchange-rate");
   try {
-    const res = await fetch("https://open.er-api.com/v6/latest/USD");
+    // 주소 뒤에 ?_=(시간) 을 붙여 브라우저 캐시를 방지합니다.
+    const res = await fetch(`https://open.er-api.com/v6/latest/USD?_=${new Date().getTime()}`);
     if (!res.ok) throw new Error("네트워크 응답 에러");
     
     const data = await res.json();
     exchangeRate = data.rates.KRW;
     
     if (el) el.innerText = `환율: 1 USD = ${exchangeRate.toLocaleString()} KRW`;
-    return exchangeRate; // 성공 시 환율 반환
+    return exchangeRate;
   } catch (err) {
     console.error("환율 로드 실패", err);
-    // 실패 시 기본값이라도 표시하여 '로딩 중' 문구 제거
-    if (el) el.innerText = `환율 로드 실패 (기본값: ${exchangeRate.toLocaleString()} KRW)`;
     return exchangeRate; 
   }
 }
-
 async function getPrice(symbol) {
   const API_KEY = '831c116330c04eedb39cc260b03e7ba8'; 
   const url = `https://api.twelvedata.com/price?symbol=${symbol}&apikey=${API_KEY}`;
@@ -99,12 +98,22 @@ async function getPrice(symbol) {
   } catch (err) { return null; }
 }
 
+// 1초 쉬어가는 함수
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
 async function refreshPrices() {
+  console.log("주가 업데이트 시작...");
   for (let stock of stocks) {
     const quote = await getPrice(stock.symbol);
-    if (quote) prices[stock.symbol] = quote.price;
+    if (quote) {
+      prices[stock.symbol] = quote.price;
+      console.log(`${stock.symbol} 업데이트 완료: ${quote.price}`);
+    }
+    // 무료 API 제한을 피하기 위해 종목당 1초씩 대기 (권장)
+    await sleep(1000); 
   }
   savePrices();
+  console.log("모든 주가 업데이트 종료");
 }
 
 /* =========================
