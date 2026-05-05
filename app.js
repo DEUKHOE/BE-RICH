@@ -13,13 +13,28 @@ const colorPalette = [
 ];
 
 async function init() {
-  loadCash();
-  await getExchangeRate();
-  if (stocks.length > 0) await refreshPrices();
-  showTab('asset'); 
-  render();           // 메인 렌더링 (리스트 + Bar + Pie)
-  renderHistory();    // 텍스트 히스토리 렌더링
-  renderHistoryChart(); // 자산 추이 그래프 렌더링
+    try {
+        loadCash();
+        
+        // 환율 로드 확인
+        await getExchangeRate();
+        const exchangeText = document.getElementById("exchange-rate").innerText;
+        if (exchangeText.includes("로딩")) {
+            throw new Error("환율 데이터를 가져오지 못했습니다.");
+        }
+
+        if (stocks.length > 0) {
+            await refreshPrices();
+        }
+
+        render();
+        renderHistory();
+        renderHistoryChart();
+        showTab('asset');
+    } catch (err) {
+        // 모바일에서 에러 내용을 확인하기 위한 임시 코드
+        alert("앱 초기화 중 에러 발생: " + err.message);
+    }
 }
 
 /* =========================
