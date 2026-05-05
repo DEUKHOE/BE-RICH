@@ -418,27 +418,43 @@ function updateTotalAndProfit(totalAssets) {
   const profitEl = document.getElementById("profit");
   if (!totalEl || !profitEl) return;
 
-  // 총 자산 표시
   totalEl.innerText = `총 자산: ${Math.floor(totalAssets).toLocaleString()}원`;
 
-  // 수익금 및 수익률 계산 (모든 종목 합산)
   let totalProfit = 0;
   let totalBuyValue = 0;
 
   stocks.forEach(s => {
     const currentPrice = prices[s.symbol] || 0;
-    const isKRW = s.currency === "KRW" || s.symbol.includes("/KRW");
     
-    const currentVal = (currentPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
-    const buyVal = (s.buyPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
+    // 1. 통화 판별 (심볼에 / 가 있거나 암호화폐인 경우 처리)
+    const isKRW = s.currency === "KRW" || s.symbol.includes(".KS") || s.symbol.includes(".KQ");
+    const isCrypto = s.symbol.includes("/"); // 예: BTC/USD
     
-    totalProfit += (currentVal - buyVal);
-    totalBuyValue += buyVal;
+    let currentValInKRW = 0;
+    let buyValInKRW = 0;
+
+    if (isKRW) {
+      // 한국 주식: 그대로 원화 계산
+      currentValInKRW = currentPrice * s.quantity;
+      buyValInKRW = s.buyPrice * s.quantity;
+    } else {
+      // 미국 주식 및 암호화폐(달러 기준): 환율 적용
+      // 만약 비트코인을 '원화' 평단가로 입력했다면 이 부분이 튈 수 있음
+      // 기본적으로 미국 주식/코인은 달러 평단가 입력을 가정함
+      currentValInKRW = (currentPrice * s.quantity) * exchangeRate;
+      buyValInKRW = (s.buyPrice * s.quantity) * exchangeRate;
+    }
+    
+    totalProfit += (currentValInKRW - buyValInKRW);
+    totalBuyValue += buyValInKRW;
   });
 
+  // 2. 수익률 계산 (분모가 0인 경우 방지)
   const totalPercent = totalBuyValue > 0 ? ((totalProfit / totalBuyValue) * 100).toFixed(2) : 0;
   
-  profitEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
+  // 3. 화면 표시
+  const color = totalProfit >= 0 ? "#ef4444" : "#3b82f6"; // 상승 빨강, 하락 파랑
+  profitEl.style.color = color;
   profitEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent}%)`;
 }
 
