@@ -499,4 +499,11 @@ function deleteSelected() {
   saveStocks(); render();
 }
 
+function resetAll() {
+  if (confirm("모든 자산 데이터와 히스토리가 삭제됩니다. 정말 초기화할까요?")) {
+    localStorage.clear();
+    location.reload(); // 페이지 새로고침하여 초기 상태로 복구
+  }
+}
+
 init();
