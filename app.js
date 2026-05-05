@@ -211,25 +211,41 @@ function editStock(index) {
 }
 
 /* =========================
-   🎨 UI 및 비중 렌더링 (버그 수정 완료)
+   🎨 UI 및 비중 렌더링 (심볼별 통화 완벽 대응)
 ========================= */
 function render() {
   const list = document.getElementById("stock-list");
   if (!list) return;
   list.innerHTML = "";
 
+  // 1. 전체 자산(원화) 계산
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
-    let v = (prices[s.symbol] || 0) * s.quantity;
-    // [버그 수정] 통화가 USD일 때만 환율을 곱함 (BTC/KRW는 제외)
-    if (s.currency === "USD") v *= exchangeRate;
+    const currentPrice = prices[s.symbol] || 0;
+    const symbolUpper = s.symbol.toUpperCase();
+
+    // [핵심] 원화 종목 판별 로직 강화
+    // - .KS (코스피), .KQ (코스닥)
+    // - /KRW 로 끝나는 암호화폐
+    // - s.currency가 KRW인 경우
+    const isKRW = symbolUpper.endsWith(".KS") || 
+                  symbolUpper.endsWith(".KQ") || 
+                  symbolUpper.endsWith("/KRW") || 
+                  s.currency === "KRW";
+    
+    let v = currentPrice * s.quantity;
+    
+    // 원화가 아닌 경우(예: /USD, NVDA 등)에만 환율 곱함
+    if (!isKRW) v *= exchangeRate; 
+    
     currentStockValueTotal += v;
   });
+
   const totalAssets = cash + currentStockValueTotal;
 
-  // 현금 카드 생성 로직 (기존과 동일)
-  const cashDiv = document.createElement("div");
+  // 2. 현금 카드 (기존과 동일)
   const cashWeight = totalAssets > 0 ? ((cash / totalAssets) * 100).toFixed(1) : 0;
+  const cashDiv = document.createElement("div");
   cashDiv.className = "stock-card";
   cashDiv.style = "border:2px solid #10b981; padding:15px; margin:10px 0; border-radius:12px; background:#f0fdf4;";
   cashDiv.innerHTML = `
@@ -241,16 +257,20 @@ function render() {
   `;
   list.appendChild(cashDiv);
 
-  // 종목 카드 리스트 (환율 중복 계산 방지 적용)
+  // 3. 종목 카드 리스트
   stocks.forEach((stock, index) => {
     const currentPrice = prices[stock.symbol] || 0;
-    const isKRW = stock.currency === "KRW" || stock.symbol.includes("/KRW");
+    const symbolUpper = stock.symbol.toUpperCase();
     
-    // 현재 가치: KRW 계열이면 환율 안 곱함
+    // 개별 카드에서도 동일한 통화 판별 로직 적용
+    const isKRW = symbolUpper.endsWith(".KS") || 
+                  symbolUpper.endsWith(".KQ") || 
+                  symbolUpper.endsWith("/KRW") || 
+                  stock.currency === "KRW";
+    
     const currentTotal = (currentPrice * stock.quantity) * (isKRW ? 1 : exchangeRate);
     const weight = totalAssets > 0 ? ((currentTotal / totalAssets) * 100).toFixed(1) : 0;
     
-    // 수익 계산: 매수 시점 원화 가치와 현재 원화 가치 비교
     const buyTotal = (stock.buyPrice * stock.quantity) * (isKRW ? 1 : exchangeRate);
     const profit = currentTotal - buyTotal;
     const percent = buyTotal > 0 ? (profit / buyTotal) * 100 : 0;
@@ -266,8 +286,11 @@ function render() {
       <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}">
         수익: ${Math.floor(profit).toLocaleString()}원 (${percent.toFixed(2)}%)
       </div>
+      <div style="margin-top:10px; font-size:0.85rem; color: #555;">
+        현재가: ${currentPrice.toLocaleString()}${isKRW ? '원' : '$'} / 평단: ${stock.buyPrice.toLocaleString()}${isKRW ? '원' : '$'}
+      </div>
       <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-        <button onclick="event.stopPropagation(); editStock(${index})" style="padding:5px 12px; font-size:0.8rem; border:1px solid #4f46e5; background:white; color:#4f46e5; border-radius:6px;">수정</button>
+        <button onclick="event.stopPropagation(); editStock(${index})" style="padding:5px 12px; font-size:0.8rem; border:1px solid #4f46e5; background:white; color:#4f46e5; border-radius:6px; cursor:pointer;">수정</button>
         <input type="checkbox" class="select-stock" style="margin-left:auto; width:18px; height:18px;">
       </div>
     `;
@@ -277,6 +300,7 @@ function render() {
   updateTotalAndProfit(totalAssets);
   renderCharts(totalAssets);
 }
+
 
 /* =========================
    📊 그래프 상시 숫자 표시 및 오류 수정
@@ -411,13 +435,14 @@ function renderHistoryChart() {
 }
 
 /* =========================
-   💰 총 자산 및 수익률 텍스트 업데이트
+   💰 총 수익 및 수익률 계산 (통화 판별 로직 동기화)
 ========================= */
 function updateTotalAndProfit(totalAssets) {
   const totalEl = document.getElementById("total");
   const profitEl = document.getElementById("profit");
   if (!totalEl || !profitEl) return;
 
+  // 1. 상단 총 자산 표시 (이미 render에서 계산된 totalAssets 사용)
   totalEl.innerText = `총 자산: ${Math.floor(totalAssets).toLocaleString()}원`;
 
   let totalProfit = 0;
@@ -425,80 +450,129 @@ function updateTotalAndProfit(totalAssets) {
 
   stocks.forEach(s => {
     const currentPrice = prices[s.symbol] || 0;
-    
-    // 1. 통화 판별 (심볼에 / 가 있거나 암호화폐인 경우 처리)
-    const isKRW = s.currency === "KRW" || s.symbol.includes(".KS") || s.symbol.includes(".KQ");
-    const isCrypto = s.symbol.includes("/"); // 예: BTC/USD
-    
-    let currentValInKRW = 0;
-    let buyValInKRW = 0;
+    const symbolUpper = s.symbol.toUpperCase();
 
-    if (isKRW) {
-      // 한국 주식: 그대로 원화 계산
-      currentValInKRW = currentPrice * s.quantity;
-      buyValInKRW = s.buyPrice * s.quantity;
-    } else {
-      // 미국 주식 및 암호화폐(달러 기준): 환율 적용
-      // 만약 비트코인을 '원화' 평단가로 입력했다면 이 부분이 튈 수 있음
-      // 기본적으로 미국 주식/코인은 달러 평단가 입력을 가정함
-      currentValInKRW = (currentPrice * s.quantity) * exchangeRate;
-      buyValInKRW = (s.buyPrice * s.quantity) * exchangeRate;
-    }
+    // [중요] render 함수와 동일한 통화 판별 로직
+    const isKRW = symbolUpper.endsWith(".KS") || 
+                  symbolUpper.endsWith(".KQ") || 
+                  symbolUpper.endsWith("/KRW") || 
+                  s.currency === "KRW";
     
-    totalProfit += (currentValInKRW - buyValInKRW);
-    totalBuyValue += buyValInKRW;
+    // 2. 현재 원화 가치 계산
+    const currentTotalKRW = (currentPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
+    
+    // 3. 매수 시점 원화 가치 계산
+    // (BTC/KRW는 평단가가 원화고, BTC/USD는 평단가가 달러라는 가정)
+    const buyTotalKRW = (s.buyPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
+    
+    totalProfit += (currentTotalKRW - buyTotalKRW);
+    totalBuyValue += buyTotalKRW;
   });
 
-  // 2. 수익률 계산 (분모가 0인 경우 방지)
+  // 4. 전체 수익률 계산 (매수 원금 대비 총 수익금)
   const totalPercent = totalBuyValue > 0 ? ((totalProfit / totalBuyValue) * 100).toFixed(2) : 0;
   
-  // 3. 화면 표시
-  const color = totalProfit >= 0 ? "#ef4444" : "#3b82f6"; // 상승 빨강, 하락 파랑
+  // 5. UI 반영
+  const color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
   profitEl.style.color = color;
   profitEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent}%)`;
 }
 
 
 /* =========================
-/* =========================
-   📅 자산 스냅샷 저장 (Daily Update)
+   📅 자산 스냅샷 저장 (통화 판별 로직 적용)
 ========================= */
 function saveSnapshot() {
   const history = JSON.parse(localStorage.getItem("history") || "[]");
   const now = new Date();
-  // '2024-05-20' 형식으로 날짜 고정 (Daily 기준)
-  const today = now.toISOString().split('T')[0]; 
+  // 한국 시간 기준으로 날짜 고정 (KST 대응)
+  const offset = now.getTimezoneOffset() * 60000;
+  const today = new Date(now - offset).toISOString().split('T')[0];
 
-  // 현재 총 자산 계산
+  // 1. 현재 시점의 정확한 원화 총 자산 계산
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
-    let v = (prices[s.symbol] || 0) * s.quantity;
-    if (s.currency === "USD") v *= exchangeRate;
+    const currentPrice = prices[s.symbol] || 0;
+    const symbolUpper = s.symbol.toUpperCase();
+
+    // 강화된 통화 판별 로직 (render 함수와 동일하게)
+    const isKRW = symbolUpper.endsWith(".KS") || 
+                  symbolUpper.endsWith(".KQ") || 
+                  symbolUpper.endsWith("/KRW") || 
+                  s.currency === "KRW";
+    
+    let v = currentPrice * s.quantity;
+    if (!isKRW) v *= exchangeRate; // USD 기반 종목만 환율 적용
+    
     currentStockValueTotal += v;
   });
+
   const totalAssets = Math.round(cash + currentStockValueTotal);
 
-  // 같은 날짜 데이터가 있는지 확인
+  // 2. 히스토리 데이터 업데이트
   const existingIdx = history.findIndex(h => h.date === today);
   
   if (existingIdx > -1) {
-    // 오늘 이미 기록했다면 금액만 업데이트
+    // 오늘 이미 기록했다면 최신 금액으로 갱신
     history[existingIdx].total = totalAssets;
   } else {
-    // 새로운 날짜라면 추가
+    // 새로운 날짜라면 기록 추가
     history.push({ date: today, total: totalAssets });
   }
 
-  // 최근 30일 데이터만 유지 (선택 사항)
+  // 데이터가 너무 많아지면 최근 30일만 유지
   if (history.length > 30) history.shift();
 
   localStorage.setItem("history", JSON.stringify(history));
   
-  // [중요] 렌더링 순서: 데이터 저장 -> 화면 텍스트 갱신 -> 차트 갱신
+  // 3. 화면 UI 및 차트 업데이트
   renderHistory();
-  renderHistoryChart(); 
+  if (typeof renderHistoryChart === "function") renderHistoryChart(); 
   
   alert(`[${today}] 자산이 기록되었습니다: ${totalAssets.toLocaleString()}원`);
+}
+
+/* =========================
+   📜 히스토리 목록 렌더링
+========================= */
+function renderHistory() {
+  const history = JSON.parse(localStorage.getItem("history") || "[]");
+  const el = document.getElementById("history");
+  if (!el) return;
+
+  if (history.length === 0) {
+    el.innerHTML = "<p style='color:#999; text-align:center; padding:20px;'>기록된 데이터가 없습니다.</p>";
+    return;
+  }
+
+  // 최신 날짜가 위로 오도록 정렬하여 출력
+  el.innerHTML = history.slice().reverse().map(h => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px dashed #eee;">
+      <span style="color:#666; font-size:0.9rem;">${h.date}</span>
+      <strong style="color:#333;">${h.total.toLocaleString()}원</strong>
+    </div>
+  `).join("");
+}
+
+/* =========================
+   💾 데이터 저장 유틸리티
+========================= */
+function saveStocks() { 
+  localStorage.setItem("stocks", JSON.stringify(stocks)); 
+}
+
+function savePrices() { 
+  localStorage.setItem("prices", JSON.stringify(prices)); 
+}
+
+function saveCash() { 
+  localStorage.setItem("cash", cash); 
+}
+
+function loadCash() { 
+  cash = Number(localStorage.getItem("cash") || 0); 
+  const cashInput = document.getElementById("cashInput");
+  if (cashInput) cashInput.value = cash;
 }
 
 function renderHistory() {
