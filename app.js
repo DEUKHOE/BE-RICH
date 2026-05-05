@@ -5,7 +5,6 @@ let stocks = JSON.parse(localStorage.getItem("stocks") || "[]");
 let prices = JSON.parse(localStorage.getItem("prices") || "{}");
 let cash = Number(localStorage.getItem("cash") || 0);
 let exchangeRate = 1350;
-let barChart, pieChart, historyChart; // 변동 그래프 변수 추가
 
 /* =========================
    📈 차트 인스턴스 전역 관리
@@ -21,6 +20,8 @@ const colorPalette = [
   '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'
 ];
 
+
+/*
 async function init() {
   loadCash();
   await getExchangeRate();
@@ -29,25 +30,61 @@ async function init() {
   render();           // 메인 렌더링 (리스트 + Bar + Pie)
   renderHistory();    // 텍스트 히스토리 렌더링
   renderHistoryChart(); // 자산 추이 그래프 렌더링
+}*/
+
+async function init() {
+  try {
+    loadCash(); // 1. 로컬 데이터 먼저 로드
+    
+    // 2. 환율 로드를 기다림 (성공하든 실패하든 다음으로 넘어감)
+    await getExchangeRate(); 
+    
+    // 3. 종목 가격 업데이트
+    if (stocks.length > 0) {
+      await refreshPrices();
+    }
+    
+    // 4. 모든 데이터 준비 후 UI 렌더링
+    render();           
+    renderHistory();    
+    renderHistoryChart();
+    showTab('asset');
+    
+  } catch (err) {
+    console.error("초기화 중 오류:", err);
+  }
+
+  // init 함수 마지막 부분에 추가
+setInterval(async () => {
+    console.log("주가 자동 갱신 중...");
+    await refreshPrices();
+    render(); // 가격 갱신 후 화면 다시 그리기
+}, 600000); // 600000ms = 10분마다 갱신
 }
+
+
+
 
 /* =========================
    🌍 데이터 통신 및 저장
 ========================= */
 /* 수정된 getExchangeRate */
 async function getExchangeRate() {
+  const el = document.getElementById("exchange-rate");
   try {
     const res = await fetch("https://open.er-api.com/v6/latest/USD");
+    if (!res.ok) throw new Error("네트워크 응답 에러");
+    
     const data = await res.json();
     exchangeRate = data.rates.KRW;
-    const el = document.getElementById("exchange-rate");
+    
     if (el) el.innerText = `환율: 1 USD = ${exchangeRate.toLocaleString()} KRW`;
-    return data; // [추가] 데이터를 리턴해줘야 await가 확실히 보장됩니다.
-  } catch (err) { 
-    console.error("환율 로드 실패", err); 
-    // 환율 로드 실패 시 기본값이라도 출력해서 로딩 중 멈춤 방지
-    const el = document.getElementById("exchange-rate");
-    if (el) el.innerText = `환율 로드 실패 (기본값: ${exchangeRate}원)`;
+    return exchangeRate; // 성공 시 환율 반환
+  } catch (err) {
+    console.error("환율 로드 실패", err);
+    // 실패 시 기본값이라도 표시하여 '로딩 중' 문구 제거
+    if (el) el.innerText = `환율 로드 실패 (기본값: ${exchangeRate.toLocaleString()} KRW)`;
+    return exchangeRate; 
   }
 }
 
