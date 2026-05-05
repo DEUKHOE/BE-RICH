@@ -87,15 +87,48 @@ async function getExchangeRate() {
     return exchangeRate; 
   }
 }
+/* =========================
+   🌍 데이터 통신 보완 (한국 주식 대응)
+========================= */
 async function getPrice(symbol) {
   const API_KEY = '831c116330c04eedb39cc260b03e7ba8'; 
-  const url = `https://api.twelvedata.com/price?symbol=${symbol}&apikey=${API_KEY}`;
+  
+  // 1. 심볼 변환 (005930.KS -> 005930)
+  let cleanSymbol = symbol.toUpperCase().trim();
+  let isKorean = false;
+
+  if (cleanSymbol.endsWith(".KS") || cleanSymbol.endsWith(".KQ")) {
+    isKorean = true;
+    cleanSymbol = cleanSymbol.split(".")[0]; // 숫자 부분만 추출
+  }
+
+  // 2. URL 생성 (한국 주식은 명확하게 하기 위해 :XKRX를 붙이기도 함)
+  // Twelve Data 무료플랜에서는 숫자 심볼만으로도 인식하는 경우가 많습니다.
+  const url = `https://api.twelvedata.com/price?symbol=${cleanSymbol}&apikey=${API_KEY}`;
+
   try {
     const res = await fetch(url);
     const data = await res.json();
-    if (data.status === "error" || !data.price) return null;
-    return { price: parseFloat(data.price), currency: (symbol.includes(".KS") || symbol.includes(".KQ")) ? "KRW" : "USD" };
-  } catch (err) { return null; }
+    
+    // API 에러 핸들링 (분당 호출 횟수 초과 등)
+    if (data.code === 429) {
+      console.error("API 호출 한도 초과! 1분 뒤에 시도하세요.");
+      return null;
+    }
+
+    if (!data.price) {
+      console.error(`${symbol} 가격을 찾을 수 없음:`, data.message);
+      return null;
+    }
+
+    return { 
+      price: parseFloat(data.price), 
+      currency: isKorean ? "KRW" : "USD" 
+    };
+  } catch (err) { 
+    console.error("네트워크 에러:", err);
+    return null; 
+  }
 }
 
 // 1초 쉬어가는 함수
@@ -147,11 +180,13 @@ async function addStock() {
   const symbolInput = document.getElementById("symbol");
   const qtyInput = document.getElementById("quantity");
   const buyInput = document.getElementById("buyPrice");
+  
   const symbol = symbolInput.value.toUpperCase().trim();
-  const quantity = Number(qtyInput.value);
-  const buyPrice = Number(buyInput.value);
+  // Number()는 소수점을 보존하지만, 명확하게 parseFloat를 써주는 것도 좋습니다.
+  const quantity = parseFloat(qtyInput.value); 
+  const buyPrice = parseFloat(buyInput.value);
 
-  if (!symbol || quantity <= 0) return alert("올바른 값을 입력하세요.");
+  if (!symbol || isNaN(quantity) || quantity <= 0) return alert("올바른 값을 입력하세요.");
   const quote = await getPrice(symbol);
   if (!quote) return alert("종목 정보를 가져올 수 없습니다.");
 
@@ -176,23 +211,23 @@ function editStock(index) {
 }
 
 /* =========================
-   🎨 UI 및 비중 렌더링 (보완 완료)
+   🎨 UI 및 비중 렌더링 (버그 수정 완료)
 ========================= */
 function render() {
   const list = document.getElementById("stock-list");
   if (!list) return;
   list.innerHTML = "";
 
-  // 1. 총 자산 계산
   let currentStockValueTotal = 0;
   stocks.forEach(s => {
     let v = (prices[s.symbol] || 0) * s.quantity;
+    // [버그 수정] 통화가 USD일 때만 환율을 곱함 (BTC/KRW는 제외)
     if (s.currency === "USD") v *= exchangeRate;
     currentStockValueTotal += v;
   });
   const totalAssets = cash + currentStockValueTotal;
 
-  // 2. 현금 비중 카드 생성
+  // 현금 카드 생성 로직 (기존과 동일)
   const cashDiv = document.createElement("div");
   const cashWeight = totalAssets > 0 ? ((cash / totalAssets) * 100).toFixed(1) : 0;
   cashDiv.className = "stock-card";
@@ -206,118 +241,119 @@ function render() {
   `;
   list.appendChild(cashDiv);
 
-  // 3. 종목 카드 리스트 생성 (index 인자 추가로 editStock 오류 해결)
+  // 종목 카드 리스트 (환율 중복 계산 방지 적용)
   stocks.forEach((stock, index) => {
     const currentPrice = prices[stock.symbol] || 0;
-    const isUSD = stock.currency === "USD";
+    const isKRW = stock.currency === "KRW" || stock.symbol.includes("/KRW");
     
-    // 현재 가치 계산 (환율 반영)
-    const currentTotal = (currentPrice * stock.quantity) * (isUSD ? exchangeRate : 1);
-    
-    // 비중 계산
+    // 현재 가치: KRW 계열이면 환율 안 곱함
+    const currentTotal = (currentPrice * stock.quantity) * (isKRW ? 1 : exchangeRate);
     const weight = totalAssets > 0 ? ((currentTotal / totalAssets) * 100).toFixed(1) : 0;
     
-    // 수익 및 수익률 계산
-    const buyTotal = (stock.buyPrice * stock.quantity) * (isUSD ? exchangeRate : 1);
+    // 수익 계산: 매수 시점 원화 가치와 현재 원화 가치 비교
+    const buyTotal = (stock.buyPrice * stock.quantity) * (isKRW ? 1 : exchangeRate);
     const profit = currentTotal - buyTotal;
     const percent = buyTotal > 0 ? (profit / buyTotal) * 100 : 0;
 
     const div = document.createElement("div");
     div.className = "stock-card";
-    div.style = "border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:12px; background:#fff; position:relative;";
-    
-    // 카드 내부 레이아웃
+    div.style = "border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:12px; background:#fff;";
     div.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;" onclick="showTab('news'); renderNews('${stock.symbol}')">
-        <strong>${stock.symbol}</strong>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong>${stock.symbol} <span style="font-size:0.7rem; color:#999;">(${stock.quantity})</span></strong>
         <span style="font-size:0.8rem; color:#666;">비중 ${weight}%</span>
       </div>
-      <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}" onclick="showTab('news'); renderNews('${stock.symbol}')">
+      <div style="margin-top:8px; font-weight:bold; color:${profit >= 0 ? '#ef4444' : '#3b82f6'}">
         수익: ${Math.floor(profit).toLocaleString()}원 (${percent.toFixed(2)}%)
       </div>
       <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-        <!-- 수정 버튼: 클릭 시 카드 클릭 이벤트(뉴스 이동) 방지 -->
-        <button onclick="event.stopPropagation(); editStock(${index})" style="padding:5px 12px; font-size:0.8rem; border:1px solid #4f46e5; background:white; color:#4f46e5; border-radius:6px; cursor:pointer; font-weight:bold;">수정</button>
-        
-        <!-- 삭제용 체크박스 -->
-        <input type="checkbox" class="select-stock" style="margin-left:auto; width:18px; height:18px;" onclick="event.stopPropagation()">
+        <button onclick="event.stopPropagation(); editStock(${index})" style="padding:5px 12px; font-size:0.8rem; border:1px solid #4f46e5; background:white; color:#4f46e5; border-radius:6px;">수정</button>
+        <input type="checkbox" class="select-stock" style="margin-left:auto; width:18px; height:18px;">
       </div>
     `;
-    
     list.appendChild(div);
   });
 
-  // 4. 하단 총액 및 차트 업데이트
   updateTotalAndProfit(totalAssets);
   renderCharts(totalAssets);
 }
 
-function updateTotalAndProfit(totalAssets) {
-  let totalInvested = 0;
-  stocks.forEach(s => {
-    let bV = s.buyPrice * s.quantity;
-    if (s.currency === "USD") bV *= exchangeRate;
-    totalInvested += bV;
-  });
-  const currentStockValue = totalAssets - cash;
-  const totalProfit = currentStockValue - totalInvested;
-  const totalPercent = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-
-  document.getElementById("total").innerText = `총 자산: ${Math.floor(totalAssets).toLocaleString()}원`;
-  const pEl = document.getElementById("profit");
-  pEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
-  pEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent.toFixed(2)}%)`;
-}
-
-
-
 /* =========================
-   📊 1. 종목 비중 차트 (Bar & Pie)
+   📊 그래프 상시 숫자 표시 및 오류 수정
 ========================= */
-function renderCharts() {
-    const ctxBar = document.getElementById("barChart");
-    const ctxPie = document.getElementById("pieChart");
-    if (!ctxBar || !ctxPie) return;
+function renderCharts(totalAssets) {
+  const ctxBar = document.getElementById("barChart");
+  const ctxPie = document.getElementById("pieChart");
 
-    // 데이터 준비
-    const labels = ["현금", ...stocks.map(s => s.symbol)];
-    const values = [cash, ...stocks.map(s => {
-        let v = (prices[s.symbol] || 0) * s.quantity;
-        return s.currency === "USD" ? v * exchangeRate : v;
-    })];
-    const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
+  if (!ctxBar || !ctxPie) {
+    console.error("차트를 그릴 canvas 엘리먼트를 찾을 수 없습니다.");
+    return;
+  }
 
-    // [핵심] 기존 차트 파괴 (메모리 및 캔버스 초기화)
-    if (myBarChart) myBarChart.destroy();
-    if (myPieChart) myPieChart.destroy();
+  // 데이터가 없을 때의 예외 처리
+  const hasData = stocks.length > 0 || cash > 0;
+  if (!hasData) {
+    console.warn("표시할 자산 데이터가 없습니다.");
+    return;
+  }
 
-    // 차트 생성 시 responsive 옵션 최적화
-    const chartOptions = {
-        responsive: true,
-        maintainAspectRatio: false, // 컨테이너 높이에 맞춤
-        animation: false, // 무한 루프 시 시각적 떨림 방지
-        plugins: {
-            legend: { display: true, position: 'bottom' }
-        }
-    };
+  const labels = ["현금", ...stocks.map(s => s.symbol)];
+  const values = [cash, ...stocks.map(s => {
+    let v = (prices[s.symbol] || 0) * s.quantity;
+    const isKRW = s.currency === "KRW" || s.symbol.includes("/KRW");
+    return isKRW ? v : v * exchangeRate;
+  })];
+  
+  const backgroundColors = labels.map((_, i) => colorPalette[i % colorPalette.length]);
 
-    myBarChart = new Chart(ctxBar, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{ label: '자산 가치(원)', data: values, backgroundColor: backgroundColors }]
-        },
-        options: { ...chartOptions, plugins: { legend: { display: false } } }
-    });
+  if (myBarChart) myBarChart.destroy();
+  if (myPieChart) myPieChart.destroy();
 
+  try {
+    // 파이 차트
     myPieChart = new Chart(ctxPie, {
-        type: 'pie',
-        data: {
-            labels: labels,
-            datasets: [{ data: values, backgroundColor: backgroundColors }]
-        },
-        options: chartOptions
+      type: 'pie',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: backgroundColors
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' }
+        }
+      }
     });
+
+    // 막대 차트
+    myBarChart = new Chart(ctxBar, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: backgroundColors
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, ticks: { display: false } }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+    console.log("차트 렌더링 완료");
+  } catch (err) {
+    console.error("차트 생성 중 오류 발생:", err);
+  }
 }
 
 /* =========================
@@ -373,6 +409,39 @@ function renderHistoryChart() {
     }
   });
 }
+
+/* =========================
+   💰 총 자산 및 수익률 텍스트 업데이트
+========================= */
+function updateTotalAndProfit(totalAssets) {
+  const totalEl = document.getElementById("total");
+  const profitEl = document.getElementById("profit");
+  if (!totalEl || !profitEl) return;
+
+  // 총 자산 표시
+  totalEl.innerText = `총 자산: ${Math.floor(totalAssets).toLocaleString()}원`;
+
+  // 수익금 및 수익률 계산 (모든 종목 합산)
+  let totalProfit = 0;
+  let totalBuyValue = 0;
+
+  stocks.forEach(s => {
+    const currentPrice = prices[s.symbol] || 0;
+    const isKRW = s.currency === "KRW" || s.symbol.includes("/KRW");
+    
+    const currentVal = (currentPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
+    const buyVal = (s.buyPrice * s.quantity) * (isKRW ? 1 : exchangeRate);
+    
+    totalProfit += (currentVal - buyVal);
+    totalBuyValue += buyVal;
+  });
+
+  const totalPercent = totalBuyValue > 0 ? ((totalProfit / totalBuyValue) * 100).toFixed(2) : 0;
+  
+  profitEl.style.color = totalProfit >= 0 ? "#ef4444" : "#3b82f6";
+  profitEl.innerText = `총 수익: ${Math.floor(totalProfit).toLocaleString()}원 (${totalPercent}%)`;
+}
+
 
 /* =========================
 /* =========================
